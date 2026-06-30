@@ -486,7 +486,8 @@ def abrir_modal_configuracion():
     combo_dif.pack(fill="x", padx=30)
 
     btn_cerrar = tk.Button(modal, text="GUARDAR Y CERRAR", font=("Segoe UI", 9, "bold"), bg=COLOR_PRIMARY_RED, fg=COLOR_TEXT_MAIN, bd=0, cursor="hand2", command=modal.destroy)
-    btn_cerrar.pack(pady=25, ipady=6, width=160)
+    btn_cerrar.config(width=20)
+    btn_cerrar.pack(pady=25, ipady=6)
 
 
 # --- VISTA: INICIO DE SESIÓN ---
