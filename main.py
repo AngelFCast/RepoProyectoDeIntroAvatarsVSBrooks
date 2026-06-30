@@ -9,6 +9,7 @@ import json
 import re
 import webbrowser
 from tkcalendar import DateEntry  # Librería para los calendarios
+import pygame
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -17,6 +18,21 @@ CASCADE_PATH = os.path.join(
     "cascades",
     "haarcascade_frontalface_default.xml"
 )
+try:
+    pygame.mixer.init()
+    
+    RUTA_MUSICA = os.path.join(BASE_DIR, "musica_fondo.mp3") 
+    
+    if os.path.exists(RUTA_MUSICA):
+        pygame.mixer.music.load(RUTA_MUSICA)
+        
+        pygame.mixer.music.play(loops=-1)
+       
+        pygame.mixer.music.set_volume(0.4) 
+    else:
+        print(f"Advertencia: No se encontró el archivo de música en {RUTA_MUSICA}")
+except Exception as e:
+    print(f"No se pudo inicializar el sistema de audio: {e}")
 
 if not os.path.exists(CASCADE_PATH):
     raise FileNotFoundError(
@@ -992,6 +1008,27 @@ contenedor_principal = tk.Frame(ventana, bg=COLOR_SURFACE_CARD, bd=1, relief="so
 contenedor_principal.config(highlightbackground="#4a5568") 
 
 mostrar_lobby()
+
+ventana.after(100, lambda: maximizar_ventana(ventana))
+ventana.mainloop()
+# ... Todo tu código anterior de las vistas y el contenedor ...
+
+contenedor_principal = tk.Frame(ventana, bg=COLOR_SURFACE_CARD, bd=1, relief="solid", highlightthickness=0)
+contenedor_principal.config(highlightbackground="#4a5568") 
+
+mostrar_lobby()
+
+# --- ESTO VA AQUÍ, AL PURO FINAL ---
+def al_cerrar_ventana():
+    try:
+        pygame.mixer.music.stop()
+        pygame.mixer.quit()
+    except:
+        pass
+    ventana.destroy()
+
+# Vincular el protocolo justo antes del loop principal
+ventana.protocol("WM_DELETE_WINDOW", al_cerrar_ventana)
 
 ventana.after(100, lambda: maximizar_ventana(ventana))
 ventana.mainloop()
