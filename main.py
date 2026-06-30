@@ -14,6 +14,8 @@ import pygame
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+LOGO_PATH = os.path.join(BASE_DIR, "logoType.png")
+
 CASCADE_PATH = os.path.join(
     BASE_DIR,
     "cascades",
@@ -419,6 +421,65 @@ def restablecer_tema():
                 redibujar()
         except tk.TclError:
             pass
+
+
+# --- LOGO: AVATARS VS ROOKS (logoType.png) ---
+
+_logo_cache = {}  # evita recargar/recomponer la imagen en cada redibujado
+
+
+def _hex_a_rgb(color_hex):
+    color_hex = color_hex.lstrip("#")
+    return tuple(int(color_hex[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def obtener_logo_photoimage(ancho=220):
+    """Carga logoType.png, lo redimensiona a `ancho` (alto proporcional) y
+    compone su canal alfa sobre el color de fondo actual de la tarjeta
+    (COLOR_SURFACE_CARD). Devuelve un tk.PhotoImage listo para usar."""
+    clave = (ancho, COLOR_SURFACE_CARD)
+    if clave in _logo_cache:
+        return _logo_cache[clave]
+
+    if not os.path.exists(LOGO_PATH):
+        return None
+
+    img = cv2.imread(LOGO_PATH, cv2.IMREAD_UNCHANGED)
+    if img is None:
+        return None
+
+    alto_original, ancho_original = img.shape[:2]
+    alto = int(alto_original * (ancho / ancho_original))
+    img = cv2.resize(img, (ancho, alto), interpolation=cv2.INTER_AREA)
+
+    if img.shape[2] == 4:
+        bgr = img[..., :3].astype(np.float32)
+        alfa = (img[..., 3].astype(np.float32) / 255.0)[..., None]
+        fondo_rgb = np.array(_hex_a_rgb(COLOR_SURFACE_CARD), dtype=np.float32)[::-1]  # a BGR
+        compuesta = bgr * alfa + fondo_rgb * (1 - alfa)
+        rgb = cv2.cvtColor(compuesta.astype(np.uint8), cv2.COLOR_BGR2RGB)
+    else:
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    cabecera = f"P6\n{ancho} {alto}\n255\n".encode("ascii")
+    datos_ppm = cabecera + rgb.tobytes()
+
+    photo = tk.PhotoImage(data=datos_ppm, format="PPM")
+    _logo_cache.clear()  # solo se necesita el tamaño/tema vigente
+    _logo_cache[clave] = photo
+    return photo
+
+
+def insertar_logo(parent, ancho=220, pady=(20, 5)):
+    """Crea y empaqueta el label del logo en `parent`. Devuelve el label
+    (o None si la imagen no se pudo cargar)."""
+    photo = obtener_logo_photoimage(ancho)
+    if photo is None:
+        return None
+    lbl_logo = tk.Label(parent, image=photo, bg=COLOR_SURFACE_CARD, borderwidth=0)
+    lbl_logo.image = photo  # referencia para evitar garbage collection
+    lbl_logo.pack(pady=pady)
+    return lbl_logo
 
 
 # --- WIDGET: BOLA DE COLORES (selector estilo Paint, rueda HSV) ---
@@ -1168,7 +1229,7 @@ def mostrar_lobby():
     btn_settings.config(command=abrir_modal_configuracion)
     btn_settings.place(x=25, y=25)
 
-    tk.Label(contenedor_principal, text="AVATARS VS ROOKS", font=("Segoe UI", 20, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=(40, 2))
+    insertar_logo(contenedor_principal, ancho=200, pady=(30, 5))
     tk.Label(contenedor_principal, text="BIENVENIDO, USUARIO", font=("Segoe UI", 11, "bold"), fg=COLOR_TEXT_MAIN, bg=COLOR_SURFACE_CARD).pack(pady=(0, 40))
 
     btn_pers = RoundedButton(contenedor_principal, text="PERSONALIZACIÓN", radius=RADIO_BOTON, height=46,
@@ -1269,8 +1330,7 @@ def mostrar_login():
 
     canvas_tarjeta_principal.place(relx=0.5, rely=0.5, anchor="center", width=556, height=586)
 
-    lbl_title = tk.Label(contenedor_principal, text="AVATARS VS ROOKS", font=("Segoe UI", 18, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD)
-    lbl_title.pack(pady=(20, 2))
+    insertar_logo(contenedor_principal, ancho=170, pady=(20, 5))
 
     lbl_subtitle = tk.Label(contenedor_principal, text="Ingresa para comenzar la batalla", font=("Segoe UI", 9), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD)
     lbl_subtitle.pack(pady=(0, 25))
