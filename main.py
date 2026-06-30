@@ -7,6 +7,7 @@ import numpy as np
 import time
 import json
 import re
+import colorsys
 import webbrowser
 from tkcalendar import DateEntry  # Librería para los calendarios
 import pygame
@@ -48,6 +49,20 @@ COLOR_TEXT_SEC = "#a0aec0"      # Texto secundario de apoyo
 COLOR_INPUT_BG = "#364357"       # Fondo interno para los inputs
 COLOR_BOX_BG = "#1e242f"         # Fondo oscuro para la caja de hobbies
 
+# Copia fija de la paleta original de fábrica, para poder "Restablecer" desde
+# Personalización sin importar cuántos temas se hayan aplicado después.
+PALETA_ORIGINAL = {
+    "COLOR_DEEP_BG": COLOR_DEEP_BG,
+    "COLOR_SURFACE_CARD": COLOR_SURFACE_CARD,
+    "COLOR_PRIMARY_RED": COLOR_PRIMARY_RED,
+    "COLOR_TEXT_MAIN": COLOR_TEXT_MAIN,
+    "COLOR_TEXT_SEC": COLOR_TEXT_SEC,
+    "COLOR_INPUT_BG": COLOR_INPUT_BG,
+    "COLOR_BOX_BG": COLOR_BOX_BG,
+}
+MODO_OSCURO_ORIGINAL = True
+COLOR_BASE_ORIGINAL = COLOR_PRIMARY_RED
+
 RADIO_TARJETA = 28   # Radio de las tarjetas/contenedores estilo Wish
 RADIO_BOTON = 20     # Radio de los botones estilo Wish (píldora)
 
@@ -56,6 +71,38 @@ RADIO_BOTON = 20     # Radio de los botones estilo Wish (píldora)
 # Tkinter no soporta border-radius nativo, así que dibujamos los contornos
 # redondeados manualmente con Canvas (polígonos suavizados) para imitar
 # la estética "Wish" solicitada por el cliente, sin tocar nada de la lógica.
+
+def _hex_a_rgb(hex_color):
+    hex_color = hex_color.lstrip("#")
+    if len(hex_color) == 3:
+        hex_color = "".join(c * 2 for c in hex_color)
+    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _rgb_a_hex(rgb):
+    r, g, b = (max(0, min(255, int(round(c)))) for c in rgb)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _color_hover(hex_color, factor=1.18):
+    """Genera una variante 'hover' (un poco más clara) de un color dado."""
+    r, g, b = _hex_a_rgb(hex_color)
+    h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+    l = min(1.0, l * factor + 0.04)
+    r2, g2, b2 = colorsys.hls_to_rgb(h, l, s)
+    return _rgb_a_hex((r2 * 255, g2 * 255, b2 * 255))
+
+
+def _luminosidad_relativa(hex_color):
+    """Devuelve la luminancia (0-1) de un color, para decidir si el texto
+    encima debe ser blanco o negro (contraste legible)."""
+    r, g, b = (c / 255 for c in _hex_a_rgb(hex_color))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _texto_legible_sobre(hex_color):
+    return "#16060a" if _luminosidad_relativa(hex_color) > 0.6 else "#ffffff"
+
 
 def _puntos_rect_redondeado(x1, y1, x2, y2, r):
     r = min(r, abs(x2 - x1) / 2, abs(y2 - y1) / 2)
@@ -71,9 +118,15 @@ class RoundedButton(tk.Canvas):
     pero con la misma interfaz básica (.config / .configure) de un tk.Button."""
 
     def __init__(self, parent, text="", command=None, radius=RADIO_BOTON,
-                 bg_color=COLOR_PRIMARY_RED, fg_color=COLOR_TEXT_MAIN,
-                 hover_color="#ff3333", canvas_bg=None, font=("Segoe UI", 10, "bold"),
+                 bg_color=None, fg_color=None,
+                 hover_color=None, canvas_bg=None, font=("Segoe UI", 10, "bold"),
                  width=200, height=40, cursor="hand2", outline_color=None, outline_width=0):
+        # Los colores se resuelven aquí (en tiempo de ejecución) y no como
+        # valores por defecto del método, para que el sistema de temas
+        # (claro/oscuro y paleta dinámica) pueda repintar botones nuevos.
+        bg_color = bg_color or COLOR_PRIMARY_RED
+        fg_color = fg_color or COLOR_TEXT_MAIN
+        hover_color = hover_color or _color_hover(bg_color)
         canvas_bg = canvas_bg or COLOR_SURFACE_CARD
         super().__init__(parent, width=width, height=height, bg=canvas_bg,
                           highlightthickness=0, cursor=cursor)
@@ -114,7 +167,9 @@ class RoundedButton(tk.Canvas):
     def _on_leave(self, event):
         self._dibujar(self.bg_color)
 
-    def config(self, **kwargs):
+    def config(self, cnf=None, **kwargs):
+        if cnf:
+            kwargs.update(cnf)
         redibujar = False
         if "command" in kwargs:
             self.command = kwargs.pop("command")
@@ -127,6 +182,8 @@ class RoundedButton(tk.Canvas):
         if "highlightbackground" in kwargs:
             self.outline_color = kwargs.pop("highlightbackground")
             redibujar = True
+        if "canvas_bg" in kwargs:
+            tk.Canvas.config(self, bg=kwargs.pop("canvas_bg"))
         if "state" in kwargs:
             kwargs.pop("state")
         if kwargs:
@@ -143,8 +200,11 @@ def crear_tarjeta_redondeada(parent, color_tarjeta=None, radio=RADIO_TARJETA, fo
     igual que un tk.Frame normal (pack/grid de hijos sin cambios)."""
     fondo_pagina = fondo_pagina or COLOR_DEEP_BG
     color_tarjeta = color_tarjeta or COLOR_SURFACE_CARD
+    # Se guarda en una lista mutable (en vez de variable de closure simple)
+    # para poder cambiar el color después de creada la tarjeta (tema dinámico).
+    estado_color = [color_tarjeta]
     canvas_fondo = tk.Canvas(parent, bg=fondo_pagina, highlightthickness=0)
-    frame_contenido = tk.Frame(canvas_fondo, bg=color_tarjeta)
+    frame_contenido = tk.Frame(canvas_fondo, bg=estado_color[0])
     ventana_id = canvas_fondo.create_window(0, 0, window=frame_contenido, anchor="center")
 
     def _refrescar(event=None):
@@ -153,15 +213,395 @@ def crear_tarjeta_redondeada(parent, color_tarjeta=None, radio=RADIO_TARJETA, fo
         h = canvas_fondo.winfo_height()
         if w > 2 and h > 2:
             pts = _puntos_rect_redondeado(0, 0, w, h, radio)
-            canvas_fondo.create_polygon(pts, smooth=True, fill=color_tarjeta,
-                                         outline=color_tarjeta, tags="rect_tarjeta")
+            canvas_fondo.create_polygon(pts, smooth=True, fill=estado_color[0],
+                                         outline=estado_color[0], tags="rect_tarjeta")
             canvas_fondo.tag_lower("rect_tarjeta")
             inset = radio
             canvas_fondo.coords(ventana_id, w / 2, h / 2)
             canvas_fondo.itemconfig(ventana_id, width=max(w - inset * 2, 1), height=max(h - inset * 2, 1))
 
+    def _actualizar_colores(nuevo_color_tarjeta, nuevo_fondo_pagina):
+        estado_color[0] = nuevo_color_tarjeta
+        canvas_fondo.config(bg=nuevo_fondo_pagina)
+        frame_contenido.config(bg=nuevo_color_tarjeta)
+        _refrescar()
+
     canvas_fondo.bind("<Configure>", _refrescar)
+    canvas_fondo.actualizar_colores = _actualizar_colores
     return canvas_fondo, frame_contenido
+
+
+# --- SISTEMA DE PERSONALIZACIÓN: TEMA Y PALETA DINÁMICA ---
+# A partir de UN solo color base (elegido con la "bola de colores"), se
+# calcula automáticamente una paleta completa y coherente (fondo, tarjetas,
+# inputs, textos) para modo claro y modo oscuro.
+
+THEME_FILE = os.path.join(BASE_DIR, "theme_config.json")
+
+MODO_OSCURO = True
+COLOR_BASE_ACTUAL = "#f41515"  # Color elegido por el usuario en la bola de colores
+
+
+def generar_paleta(color_base_hex, modo_oscuro=True):
+    """Calcula una paleta de colores coherente a partir de un único color base,
+    ajustando matiz/saturación/luminosidad (HSL) en vez de usar colores fijos."""
+    r, g, b = _hex_a_rgb(color_base_hex)
+    h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+    s = max(s, 0.55)  # aseguramos que el color primario se vea vivo
+
+    def tono(luminosidad, saturacion=None, hue=None):
+        hh = hue if hue is not None else h
+        ss = saturacion if saturacion is not None else s
+        rr, gg, bb = colorsys.hls_to_rgb(hh, luminosidad, ss)
+        return _rgb_a_hex((rr * 255, gg * 255, bb * 255))
+
+    primario = tono(max(0.40, min(l, 0.58)), saturacion=min(s + 0.15, 1.0))
+
+    if modo_oscuro:
+        fondo_profundo = tono(0.05, saturacion=min(s * 0.6, 0.55))
+        tarjeta = tono(0.16, saturacion=min(s * 0.35, 0.35))
+        input_bg = tono(0.22, saturacion=min(s * 0.30, 0.30))
+        box_bg = tono(0.10, saturacion=min(s * 0.40, 0.35))
+        texto_main = "#ffffff"
+        texto_sec = tono(0.68, saturacion=min(s * 0.20, 0.25))
+    else:
+        fondo_profundo = tono(0.93, saturacion=min(s * 0.25, 0.20))
+        tarjeta = tono(0.99, saturacion=min(s * 0.10, 0.08))
+        input_bg = tono(0.90, saturacion=min(s * 0.20, 0.18))
+        box_bg = tono(0.86, saturacion=min(s * 0.22, 0.20))
+        texto_main = "#16060a"
+        texto_sec = tono(0.32, saturacion=min(s * 0.20, 0.25))
+
+    return {
+        "COLOR_DEEP_BG": fondo_profundo,
+        "COLOR_SURFACE_CARD": tarjeta,
+        "COLOR_PRIMARY_RED": primario,
+        "COLOR_TEXT_MAIN": texto_main,
+        "COLOR_TEXT_SEC": texto_sec,
+        "COLOR_INPUT_BG": input_bg,
+        "COLOR_BOX_BG": box_bg,
+    }
+
+
+def cargar_tema_guardado():
+    """Solo carga un tema si el usuario ya guardó uno antes. Si es la primera
+    vez que se ejecuta la app, se respeta la paleta original (hardcodeada)
+    y no se toca nada."""
+    global COLOR_BASE_ACTUAL, MODO_OSCURO
+    if os.path.exists(THEME_FILE):
+        try:
+            with open(THEME_FILE, "r") as f:
+                datos = json.load(f)
+            COLOR_BASE_ACTUAL = datos.get("color_base", COLOR_BASE_ACTUAL)
+            MODO_OSCURO = datos.get("modo_oscuro", MODO_OSCURO)
+            return True
+        except Exception as e:
+            print(f"No se pudo cargar el tema guardado: {e}")
+    return False
+
+
+def guardar_tema_actual():
+    try:
+        with open(THEME_FILE, "w") as f:
+            json.dump({"color_base": COLOR_BASE_ACTUAL, "modo_oscuro": MODO_OSCURO}, f)
+    except Exception as e:
+        print(f"No se pudo guardar el tema: {e}")
+
+
+def aplicar_tema(color_base_hex=None, modo_oscuro=None, guardar=True):
+    """Recalcula la paleta y repinta TODA la interfaz ya construida:
+    ventana raíz, barra de configuración, tarjeta principal y la vista activa."""
+    global COLOR_DEEP_BG, COLOR_SURFACE_CARD, COLOR_PRIMARY_RED, COLOR_TEXT_MAIN
+    global COLOR_TEXT_SEC, COLOR_INPUT_BG, COLOR_BOX_BG, COLOR_BASE_ACTUAL, MODO_OSCURO
+
+    if color_base_hex is not None:
+        COLOR_BASE_ACTUAL = color_base_hex
+    if modo_oscuro is not None:
+        MODO_OSCURO = modo_oscuro
+
+    paleta = generar_paleta(COLOR_BASE_ACTUAL, MODO_OSCURO)
+    COLOR_DEEP_BG = paleta["COLOR_DEEP_BG"]
+    COLOR_SURFACE_CARD = paleta["COLOR_SURFACE_CARD"]
+    COLOR_PRIMARY_RED = paleta["COLOR_PRIMARY_RED"]
+    COLOR_TEXT_MAIN = paleta["COLOR_TEXT_MAIN"]
+    COLOR_TEXT_SEC = paleta["COLOR_TEXT_SEC"]
+    COLOR_INPUT_BG = paleta["COLOR_INPUT_BG"]
+    COLOR_BOX_BG = paleta["COLOR_BOX_BG"]
+
+    if guardar:
+        guardar_tema_actual()
+
+    # Si la ventana principal ya existe, repintamos todo lo persistente.
+    if "ventana" in globals():
+        try:
+            ventana.configure(bg=COLOR_DEEP_BG)
+            style.configure("TCombobox", fieldbackground=COLOR_INPUT_BG, background=COLOR_SURFACE_CARD,
+                             foreground=COLOR_TEXT_MAIN, arrowcolor=COLOR_TEXT_MAIN, bordercolor=COLOR_TEXT_SEC)
+            style.map("TCombobox", fieldbackground=[("readonly", COLOR_INPUT_BG)],
+                      foreground=[("readonly", COLOR_TEXT_MAIN)])
+            style.configure("Calendario.TCombobox", fieldbackground=COLOR_INPUT_BG, background=COLOR_SURFACE_CARD,
+                             foreground=COLOR_TEXT_MAIN, bordercolor=COLOR_TEXT_SEC)
+
+            if "canvas_tarjeta_principal" in globals():
+                canvas_tarjeta_principal.actualizar_colores(COLOR_SURFACE_CARD, COLOR_DEEP_BG)
+            if "btn_settings" in globals():
+                btn_settings.config(bg_color=COLOR_PRIMARY_RED, highlightbackground=COLOR_DEEP_BG, canvas_bg=COLOR_DEEP_BG)
+            if "lbl_music" in globals():
+                lbl_music.config(bg=COLOR_DEEP_BG, fg=COLOR_TEXT_SEC)
+            if "lbl_lang" in globals():
+                lbl_lang.config(bg=COLOR_DEEP_BG, fg=COLOR_TEXT_SEC)
+
+            # Volvemos a dibujar la vista actual para que recoja los colores nuevos.
+            vistas_disponibles = {
+                "lobby": globals().get("mostrar_lobby"),
+                "personalizacion": globals().get("mostrar_personalizacion"),
+                "login": globals().get("mostrar_login"),
+                "registro": globals().get("mostrar_registro"),
+            }
+            redibujar = vistas_disponibles.get(vista_actual)
+            if redibujar:
+                redibujar()
+        except tk.TclError:
+            pass
+
+    return paleta
+
+
+def restablecer_tema():
+    """Vuelve a la paleta de colores original de fábrica (ignora el color
+    base elegido y el modo guardado) y borra el archivo de tema personalizado."""
+    global COLOR_DEEP_BG, COLOR_SURFACE_CARD, COLOR_PRIMARY_RED, COLOR_TEXT_MAIN
+    global COLOR_TEXT_SEC, COLOR_INPUT_BG, COLOR_BOX_BG, COLOR_BASE_ACTUAL, MODO_OSCURO
+
+    COLOR_DEEP_BG = PALETA_ORIGINAL["COLOR_DEEP_BG"]
+    COLOR_SURFACE_CARD = PALETA_ORIGINAL["COLOR_SURFACE_CARD"]
+    COLOR_PRIMARY_RED = PALETA_ORIGINAL["COLOR_PRIMARY_RED"]
+    COLOR_TEXT_MAIN = PALETA_ORIGINAL["COLOR_TEXT_MAIN"]
+    COLOR_TEXT_SEC = PALETA_ORIGINAL["COLOR_TEXT_SEC"]
+    COLOR_INPUT_BG = PALETA_ORIGINAL["COLOR_INPUT_BG"]
+    COLOR_BOX_BG = PALETA_ORIGINAL["COLOR_BOX_BG"]
+    COLOR_BASE_ACTUAL = COLOR_BASE_ORIGINAL
+    MODO_OSCURO = MODO_OSCURO_ORIGINAL
+
+    try:
+        if os.path.exists(THEME_FILE):
+            os.remove(THEME_FILE)
+    except Exception as e:
+        print(f"No se pudo borrar el tema guardado: {e}")
+
+    if "ventana" in globals():
+        try:
+            ventana.configure(bg=COLOR_DEEP_BG)
+            style.configure("TCombobox", fieldbackground=COLOR_INPUT_BG, background=COLOR_SURFACE_CARD,
+                             foreground=COLOR_TEXT_MAIN, arrowcolor=COLOR_TEXT_MAIN, bordercolor=COLOR_TEXT_SEC)
+            style.map("TCombobox", fieldbackground=[("readonly", COLOR_INPUT_BG)],
+                      foreground=[("readonly", COLOR_TEXT_MAIN)])
+            style.configure("Calendario.TCombobox", fieldbackground=COLOR_INPUT_BG, background=COLOR_SURFACE_CARD,
+                             foreground=COLOR_TEXT_MAIN, bordercolor=COLOR_TEXT_SEC)
+
+            if "canvas_tarjeta_principal" in globals():
+                canvas_tarjeta_principal.actualizar_colores(COLOR_SURFACE_CARD, COLOR_DEEP_BG)
+            if "btn_settings" in globals():
+                btn_settings.config(bg_color=COLOR_PRIMARY_RED, highlightbackground=COLOR_DEEP_BG, canvas_bg=COLOR_DEEP_BG)
+            if "lbl_music" in globals():
+                lbl_music.config(bg=COLOR_DEEP_BG, fg=COLOR_TEXT_SEC)
+            if "lbl_lang" in globals():
+                lbl_lang.config(bg=COLOR_DEEP_BG, fg=COLOR_TEXT_SEC)
+
+            vistas_disponibles = {
+                "lobby": globals().get("mostrar_lobby"),
+                "personalizacion": globals().get("mostrar_personalizacion"),
+                "login": globals().get("mostrar_login"),
+                "registro": globals().get("mostrar_registro"),
+            }
+            redibujar = vistas_disponibles.get(vista_actual)
+            if redibujar:
+                redibujar()
+        except tk.TclError:
+            pass
+
+
+# --- WIDGET: BOLA DE COLORES (selector estilo Paint, rueda HSV) ---
+
+def _generar_imagen_rueda_color(diametro=220, valor=1.0):
+    """Genera (con numpy + cv2) una imagen de rueda de color HSV: el ángulo es
+    el matiz y la distancia al centro es la saturación. Devuelve bytes PPM
+    listos para tk.PhotoImage."""
+    eje = np.arange(diametro)
+    xx, yy = np.meshgrid(eje, eje)
+    cx = cy = diametro / 2
+    dx = xx - cx
+    dy = yy - cy
+    radio = np.sqrt(dx ** 2 + dy ** 2)
+    angulo = (np.degrees(np.arctan2(-dy, dx)) + 360) % 360
+
+    hsv = np.zeros((diametro, diametro, 3), dtype=np.uint8)
+    hsv[..., 0] = (angulo / 2).astype(np.uint8)  # OpenCV usa H en 0-179
+    sat = np.clip((radio / (diametro / 2)) * 255, 0, 255)
+    hsv[..., 1] = sat.astype(np.uint8)
+    hsv[..., 2] = int(max(0, min(1, valor)) * 255)
+
+    rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+
+    mascara_fuera = radio > (diametro / 2)
+    rgb[mascara_fuera] = (45, 51, 66)  # color de fondo fuera del círculo
+
+    cabecera = f"P6\n{diametro} {diametro}\n255\n".encode("ascii")
+    return cabecera + rgb.tobytes()
+
+
+class RuedaDeColores(tk.Frame):
+    """Selector de color circular (bola de colores) estilo Paint: clic/arrastre
+    sobre la rueda elige matiz+saturación; el deslizador controla el brillo."""
+
+    def __init__(self, parent, diametro=220, color_inicial="#f41515", on_change=None, bg=None):
+        bg = bg or COLOR_SURFACE_CARD
+        super().__init__(parent, bg=bg)
+        self.diametro = diametro
+        self.on_change = on_change
+        self.valor = 1.0
+        self.color_actual = color_inicial
+
+        self.canvas = tk.Canvas(self, width=diametro, height=diametro, bg=bg, highlightthickness=0, cursor="hand2")
+        self.canvas.pack()
+        self._redibujar_rueda()
+
+        self.marcador = self.canvas.create_oval(0, 0, 0, 0, outline="#ffffff", width=2)
+        self._set_color_inicial(color_inicial)
+
+        self.canvas.bind("<Button-1>", self._on_click)
+        self.canvas.bind("<B1-Motion>", self._on_click)
+
+        self.frame_preview = tk.Frame(self, bg=bg)
+        self.frame_preview.pack(fill="x", pady=(10, 0))
+
+        tk.Label(self.frame_preview, text="Brillo", font=("Segoe UI", 8), fg=COLOR_TEXT_SEC, bg=bg).pack(anchor="w")
+        self.slider_brillo = ttk.Scale(self.frame_preview, from_=0.15, to=1.0, value=1.0,
+                                        orient="horizontal", command=self._on_brillo)
+        self.slider_brillo.pack(fill="x", pady=(0, 8))
+
+        self.swatch = tk.Canvas(self.frame_preview, width=diametro, height=28, highlightthickness=1,
+                                 highlightbackground=COLOR_TEXT_SEC, bg=bg)
+        self.swatch.pack()
+        self._refrescar_swatch()
+
+    def _redibujar_rueda(self):
+        datos_ppm = _generar_imagen_rueda_color(self.diametro, self.valor)
+        self._img = tk.PhotoImage(data=datos_ppm, format="PPM")
+        if hasattr(self, "_img_id"):
+            self.canvas.itemconfig(self._img_id, image=self._img)
+        else:
+            self._img_id = self.canvas.create_image(0, 0, anchor="nw", image=self._img)
+            self.canvas.tag_lower(self._img_id)
+
+    def _set_color_inicial(self, hex_color):
+        r, g, b = _hex_a_rgb(hex_color)
+        h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+        self.valor = max(l + s / 2, 0.4)
+        radio_max = self.diametro / 2
+        ang = np.radians(h * 360)
+        radio = min(s, 1.0) * radio_max
+        x = radio_max + radio * np.cos(ang)
+        y = radio_max - radio * np.sin(ang)
+        self._mover_marcador(x, y)
+        self.color_actual = hex_color
+
+    def _mover_marcador(self, x, y, radio_punto=7):
+        self.canvas.coords(self.marcador, x - radio_punto, y - radio_punto, x + radio_punto, y + radio_punto)
+
+    def _on_click(self, event):
+        cx = cy = self.diametro / 2
+        dx = event.x - cx
+        dy = event.y - cy
+        radio = (dx ** 2 + dy ** 2) ** 0.5
+        radio_max = self.diametro / 2
+        if radio > radio_max:
+            # Recorta el punto al borde del círculo si se arrastra hacia afuera
+            factor = radio_max / radio
+            dx *= factor
+            dy *= factor
+            radio = radio_max
+        x, y = cx + dx, cy + dy
+        self._mover_marcador(x, y)
+
+        angulo = (np.degrees(np.arctan2(-dy, dx)) + 360) % 360
+        saturacion = min(radio / radio_max, 1.0)
+        r, g, b = colorsys.hls_to_rgb(angulo / 360, self.valor, saturacion)
+        self.color_actual = _rgb_a_hex((r * 255, g * 255, b * 255))
+        self._refrescar_swatch()
+        if self.on_change:
+            self.on_change(self.color_actual)
+
+    def _on_brillo(self, valor_str):
+        self.valor = float(valor_str)
+        self._redibujar_rueda()
+        coords = self.canvas.coords(self.marcador)
+        if coords:
+            cx = cy = self.diametro / 2
+            x = (coords[0] + coords[2]) / 2
+            y = (coords[1] + coords[3]) / 2
+            dx, dy = x - cx, y - cy
+            radio = (dx ** 2 + dy ** 2) ** 0.5
+            radio_max = self.diametro / 2
+            angulo = (np.degrees(np.arctan2(-dy, dx)) + 360) % 360
+            saturacion = min(radio / radio_max, 1.0)
+            r, g, b = colorsys.hls_to_rgb(angulo / 360, self.valor, saturacion)
+            self.color_actual = _rgb_a_hex((r * 255, g * 255, b * 255))
+        self._refrescar_swatch()
+        if self.on_change:
+            self.on_change(self.color_actual)
+
+    def _refrescar_swatch(self):
+        self.swatch.delete("all")
+        self.swatch.create_rectangle(0, 0, self.diametro, 28, fill=self.color_actual, outline="")
+        self.swatch.create_text(self.diametro / 2, 14, text=self.color_actual.upper(),
+                                 fill=_texto_legible_sobre(self.color_actual), font=("Segoe UI", 9, "bold"))
+
+    def obtener_color(self):
+        return self.color_actual
+
+
+def abrir_selector_bola_colores(parent_ventana, color_inicial, al_confirmar):
+    """Abre un modal con la bola de colores (rueda HSV) y devuelve el color
+    elegido mediante el callback al_confirmar(hex_color) al pulsar Confirmar."""
+    modal = tk.Toplevel(parent_ventana)
+    modal.title("Elige tu color base")
+    modal.configure(bg=COLOR_DEEP_BG)
+    modal.resizable(False, False)
+    modal.transient(parent_ventana)
+
+    ancho, alto = 300, 400
+    modal.geometry(f"{ancho}x{alto}")
+    x = parent_ventana.winfo_x() + (parent_ventana.winfo_width() // 2) - ancho // 2
+    y = parent_ventana.winfo_y() + (parent_ventana.winfo_height() // 2) - alto // 2
+    modal.geometry(f"+{x}+{y}")
+
+    modal.update_idletasks()
+    modal.lift()
+    modal.focus_force()
+    try:
+        modal.grab_set()
+    except tk.TclError:
+        modal.after(100, lambda: modal.grab_set())
+
+    tk.Label(modal, text="🎨 BOLA DE COLORES", font=("Segoe UI", 12, "bold"),
+             fg=COLOR_PRIMARY_RED, bg=COLOR_DEEP_BG).pack(pady=(15, 10))
+
+    rueda = RuedaDeColores(modal, diametro=200, color_inicial=color_inicial, bg=COLOR_DEEP_BG)
+    rueda.pack(padx=20)
+
+    def confirmar():
+        al_confirmar(rueda.obtener_color())
+        modal.destroy()
+
+    btn_confirmar = RoundedButton(modal, text="USAR ESTE COLOR", radius=RADIO_BOTON, height=42,
+                                   font=("Segoe UI", 10, "bold"), canvas_bg=COLOR_DEEP_BG, command=confirmar)
+    btn_confirmar.pack(fill="x", padx=20, pady=(15, 8))
+
+    lbl_cancelar = tk.Label(modal, text="Cancelar", font=("Segoe UI", 9, "underline"),
+                             fg=COLOR_TEXT_SEC, bg=COLOR_DEEP_BG, cursor="hand2")
+    lbl_cancelar.pack()
+    lbl_cancelar.bind("<Button-1>", lambda e: modal.destroy())
 
 
 # Configuración del archivo de Base de Datos JSON
@@ -523,26 +963,67 @@ def mostrar_personalizacion():
                            command=mostrar_lobby)
     btn_x.place(relx=1.0, rely=0.0, x=-10, y=10, anchor="ne")
 
-    tk.Label(contenedor_principal, text="PERSONALIZACIÓN", font=("Segoe UI", 16, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=(30, 20))
-    tk.Label(contenedor_principal, text="1. Elige tu Color Base", font=("Segoe UI", 9), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD).pack(anchor="w", padx=40)
+    tk.Label(contenedor_principal, text="PERSONALIZACIÓN", font=("Segoe UI", 16, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=(30, 15))
 
-    color_actual = tk.StringVar(value=COLOR_PRIMARY_RED)
+    # --- 1. MODO VISUAL: CLARO / OSCURO ---
+    tk.Label(contenedor_principal, text="1. Modo Visual", font=("Segoe UI", 9), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD).pack(anchor="w", padx=40)
 
-    def cambiar_color():
-        c = colorchooser.askcolor(title="Selecciona color base")[1]
-        if c:
-            color_actual.set(c)
-            btn_sphere.config(highlightbackground=c)
+    frame_modo = tk.Frame(contenedor_principal, bg=COLOR_SURFACE_CARD)
+    frame_modo.pack(fill="x", padx=40, pady=(6, 18))
+
+    def fijar_modo(es_oscuro):
+        aplicar_tema(modo_oscuro=es_oscuro)
+
+    btn_modo_oscuro = RoundedButton(frame_modo, text="🌙 OSCURO", radius=16, height=38,
+                                     font=("Segoe UI", 9, "bold"),
+                                     bg_color=COLOR_PRIMARY_RED if MODO_OSCURO else COLOR_INPUT_BG,
+                                     command=lambda: fijar_modo(True))
+    btn_modo_oscuro.pack(side="left", expand=True, fill="x", padx=(0, 5))
+
+    btn_modo_claro = RoundedButton(frame_modo, text="☀ CLARO", radius=16, height=38,
+                                    font=("Segoe UI", 9, "bold"),
+                                    bg_color=COLOR_PRIMARY_RED if not MODO_OSCURO else COLOR_INPUT_BG,
+                                    command=lambda: fijar_modo(False))
+    btn_modo_claro.pack(side="left", expand=True, fill="x", padx=(5, 0))
+
+    # --- 2. COLOR BASE: BOLA DE COLORES ---
+    tk.Label(contenedor_principal, text="2. Elige tu Color Base", font=("Segoe UI", 9), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD).pack(anchor="w", padx=40)
+
+    color_actual = tk.StringVar(value=COLOR_BASE_ACTUAL)
+
+    def refrescar_bola():
+        btn_sphere.config(bg_color=color_actual.get(), highlightbackground=color_actual.get())
+
+    def elegir_color():
+        def al_confirmar(hex_color):
+            color_actual.set(hex_color)
+            refrescar_bola()
+        abrir_selector_bola_colores(ventana, color_actual.get(), al_confirmar)
 
     btn_sphere = RoundedButton(contenedor_principal, text="🎨", radius=60, width=120, height=120,
-                               font=("Segoe UI", 24), bg_color=COLOR_INPUT_BG, hover_color=COLOR_INPUT_BG,
-                               outline_color=COLOR_PRIMARY_RED, outline_width=4, command=cambiar_color)
-    btn_sphere.pack(pady=20)
+                               font=("Segoe UI", 24), bg_color=color_actual.get(), hover_color=color_actual.get(),
+                               outline_color=COLOR_TEXT_MAIN, outline_width=4, command=elegir_color)
+    btn_sphere.pack(pady=15)
+    tk.Label(contenedor_principal, text="Toca la bola para abrir la rueda de colores", font=("Segoe UI", 8),
+             fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD).pack()
+
+    def aplicar_cambios():
+        aplicar_tema(color_base_hex=color_actual.get())
+        messagebox.showinfo("Éxito", "Paleta actualizada en toda la aplicación.")
 
     btn_apply = RoundedButton(contenedor_principal, text="APLICAR CAMBIOS", radius=RADIO_BOTON, height=46,
                                font=("Segoe UI", 10, "bold"),
-                               command=lambda: messagebox.showinfo("Éxito", f"Paleta actualizada a {color_actual.get()}"))
+                               command=aplicar_cambios)
     btn_apply.pack(fill="x", padx=40, pady=(20, 5))
+
+    def restablecer_y_refrescar():
+        restablecer_tema()
+        messagebox.showinfo("Restablecido", "Se recuperó la paleta de colores original.")
+
+    btn_reset = RoundedButton(contenedor_principal, text="RESTABLECER COLORES ORIGINALES", radius=RADIO_BOTON, height=40,
+                               font=("Segoe UI", 9, "bold"), bg_color=COLOR_INPUT_BG,
+                               command=restablecer_y_refrescar)
+    btn_reset.pack(fill="x", padx=40, pady=(0, 5))
 
     lbl_back_lobby = tk.Label(contenedor_principal, text="← Volver al Menú Principal", font=("Segoe UI", 8, "underline"), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD, cursor="hand2")
     lbl_back_lobby.pack(pady=2)
@@ -1099,6 +1580,10 @@ def mostrar_registro():
 
 # --- CONFIGURACIÓN DE LA RAÍZ ---
 
+_HAY_TEMA_GUARDADO = cargar_tema_guardado()
+if _HAY_TEMA_GUARDADO:
+    aplicar_tema(guardar=False)  # recalcula la paleta inicial solo si el usuario ya personalizó antes
+
 ventana = tk.Tk()
 ventana.title("Avatars VS Rooks - Sistema Central")
 ventana.configure(bg=COLOR_DEEP_BG)
@@ -1157,6 +1642,9 @@ lbl_lang.place(relx=1.0, rely=1.0, x=-25, y=-25, anchor="se")
 
 
 canvas_tarjeta_principal, contenedor_principal = crear_tarjeta_redondeada(ventana, radio=RADIO_TARJETA)
+
+if _HAY_TEMA_GUARDADO:
+    aplicar_tema(guardar=False)  # sincroniza ventana, tarjeta y barra con la paleta cargada
 
 mostrar_lobby()
 
