@@ -48,6 +48,122 @@ COLOR_TEXT_SEC = "#a0aec0"      # Texto secundario de apoyo
 COLOR_INPUT_BG = "#364357"       # Fondo interno para los inputs
 COLOR_BOX_BG = "#1e242f"         # Fondo oscuro para la caja de hobbies
 
+RADIO_TARJETA = 28   # Radio de las tarjetas/contenedores estilo Wish
+RADIO_BOTON = 20     # Radio de los botones estilo Wish (píldora)
+
+
+# --- WIDGETS REDONDEADOS ESTILO "WISH" ---
+# Tkinter no soporta border-radius nativo, así que dibujamos los contornos
+# redondeados manualmente con Canvas (polígonos suavizados) para imitar
+# la estética "Wish" solicitada por el cliente, sin tocar nada de la lógica.
+
+def _puntos_rect_redondeado(x1, y1, x2, y2, r):
+    r = min(r, abs(x2 - x1) / 2, abs(y2 - y1) / 2)
+    return [
+        x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
+        x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
+        x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
+    ]
+
+
+class RoundedButton(tk.Canvas):
+    """Botón con esquinas redondeadas (estilo píldora/Wish) dibujado en Canvas,
+    pero con la misma interfaz básica (.config / .configure) de un tk.Button."""
+
+    def __init__(self, parent, text="", command=None, radius=RADIO_BOTON,
+                 bg_color=COLOR_PRIMARY_RED, fg_color=COLOR_TEXT_MAIN,
+                 hover_color="#ff3333", canvas_bg=None, font=("Segoe UI", 10, "bold"),
+                 width=200, height=40, cursor="hand2", outline_color=None, outline_width=0):
+        canvas_bg = canvas_bg or COLOR_SURFACE_CARD
+        super().__init__(parent, width=width, height=height, bg=canvas_bg,
+                          highlightthickness=0, cursor=cursor)
+        self.command = command
+        self.radius = radius
+        self.bg_color = bg_color
+        self.hover_color = hover_color
+        self.fg_color = fg_color
+        self.text = text
+        self.font = font
+        self.outline_color = outline_color
+        self.outline_width = outline_width
+        self._dibujar()
+        self.bind("<Button-1>", self._on_click)
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Configure>", lambda e: self._dibujar())
+
+    def _dibujar(self, color=None):
+        self.delete("all")
+        w = self.winfo_width() if self.winfo_width() > 1 else int(self["width"])
+        h = self.winfo_height() if self.winfo_height() > 1 else int(self["height"])
+        color = color or self.bg_color
+        margen = (self.outline_width + 1) if self.outline_color else 1
+        pts = _puntos_rect_redondeado(margen, margen, w - margen, h - margen, self.radius)
+        outline_dibujo = self.outline_color if self.outline_color else color
+        ancho_outline = self.outline_width if self.outline_color else 0
+        self.create_polygon(pts, smooth=True, fill=color, outline=outline_dibujo, width=ancho_outline)
+        self.create_text(w / 2, h / 2, text=self.text, fill=self.fg_color, font=self.font)
+
+    def _on_click(self, event):
+        if self.command:
+            self.command()
+
+    def _on_enter(self, event):
+        self._dibujar(self.hover_color)
+
+    def _on_leave(self, event):
+        self._dibujar(self.bg_color)
+
+    def config(self, **kwargs):
+        redibujar = False
+        if "command" in kwargs:
+            self.command = kwargs.pop("command")
+        if "text" in kwargs:
+            self.text = kwargs.pop("text")
+            redibujar = True
+        if "bg_color" in kwargs:
+            self.bg_color = kwargs.pop("bg_color")
+            redibujar = True
+        if "highlightbackground" in kwargs:
+            self.outline_color = kwargs.pop("highlightbackground")
+            redibujar = True
+        if "state" in kwargs:
+            kwargs.pop("state")
+        if kwargs:
+            tk.Canvas.config(self, **kwargs)
+        if redibujar:
+            self._dibujar()
+
+    configure = config
+
+
+def crear_tarjeta_redondeada(parent, color_tarjeta=None, radio=RADIO_TARJETA, fondo_pagina=None):
+    """Crea un par (canvas_fondo, frame_contenido) que simula una tarjeta
+    con esquinas redondeadas estilo Wish. El frame_contenido se usa exactamente
+    igual que un tk.Frame normal (pack/grid de hijos sin cambios)."""
+    fondo_pagina = fondo_pagina or COLOR_DEEP_BG
+    color_tarjeta = color_tarjeta or COLOR_SURFACE_CARD
+    canvas_fondo = tk.Canvas(parent, bg=fondo_pagina, highlightthickness=0)
+    frame_contenido = tk.Frame(canvas_fondo, bg=color_tarjeta)
+    ventana_id = canvas_fondo.create_window(0, 0, window=frame_contenido, anchor="center")
+
+    def _refrescar(event=None):
+        canvas_fondo.delete("rect_tarjeta")
+        w = canvas_fondo.winfo_width()
+        h = canvas_fondo.winfo_height()
+        if w > 2 and h > 2:
+            pts = _puntos_rect_redondeado(0, 0, w, h, radio)
+            canvas_fondo.create_polygon(pts, smooth=True, fill=color_tarjeta,
+                                         outline=color_tarjeta, tags="rect_tarjeta")
+            canvas_fondo.tag_lower("rect_tarjeta")
+            inset = radio
+            canvas_fondo.coords(ventana_id, w / 2, h / 2)
+            canvas_fondo.itemconfig(ventana_id, width=max(w - inset * 2, 1), height=max(h - inset * 2, 1))
+
+    canvas_fondo.bind("<Configure>", _refrescar)
+    return canvas_fondo, frame_contenido
+
+
 # Configuración del archivo de Base de Datos JSON
 USERS_JSON = "usuarios.json"
 if not os.path.exists(USERS_JSON):
@@ -319,17 +435,19 @@ def recover_password():
     
     ventana_rec = tk.Toplevel(ventana)
     ventana_rec.title("Recuperación de Contraseña")
-    ventana_rec.configure(bg=COLOR_SURFACE_CARD)
+    ventana_rec.configure(bg=COLOR_DEEP_BG)
     
     ventana_rec.resizable(True, True)
     maximizar_ventana(ventana_rec)
     
     # Botón X
-    btn_x = tk.Button(ventana_rec, text="X", font=("Arial", 12, "bold"), bg=COLOR_PRIMARY_RED, fg="white", bd=0, command=ventana_rec.destroy)
+    btn_x = RoundedButton(ventana_rec, text="X", radius=18, width=36, height=36, font=("Arial", 11, "bold"),
+                           bg_color=COLOR_PRIMARY_RED, hover_color="#ff3333", canvas_bg=COLOR_DEEP_BG,
+                           command=ventana_rec.destroy)
     btn_x.place(relx=1.0, rely=0.0, x=-10, y=10, anchor="ne")
     
-    card_rec = tk.Frame(ventana_rec, bg=COLOR_SURFACE_CARD, bd=1, relief="solid")
-    card_rec.place(relx=0.5, rely=0.5, anchor="center", width=400, height=300)
+    canvas_card_rec, card_rec = crear_tarjeta_redondeada(ventana_rec, radio=RADIO_TARJETA)
+    canvas_card_rec.place(relx=0.5, rely=0.5, anchor="center", width=456, height=356)
     
     tk.Label(card_rec, text="RECUPERACIÓN DE CUENTA", font=("Segoe UI", 12, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=15)
     tk.Label(card_rec, text="Ingresa tu Nombre de Usuario:", font=("Segoe UI", 9), fg=COLOR_TEXT_MAIN, bg=COLOR_SURFACE_CARD).pack()
@@ -361,10 +479,13 @@ def recover_password():
             else:
                 messagebox.showerror("Error", "Respuesta incorrecta de seguridad.")
         
-        btn_v = tk.Button(card_rec, text="VERIFICAR RESPUESTA", font=("Segoe UI", 9, "bold"), bg=COLOR_PRIMARY_RED, fg=COLOR_TEXT_MAIN, bd=0, command=verificar_respuesta)
-        btn_v.pack(pady=15, ipady=5, width=200)
+        btn_v = RoundedButton(card_rec, text="VERIFICAR RESPUESTA", radius=RADIO_BOTON, width=220, height=38,
+                               font=("Segoe UI", 9, "bold"), command=verificar_respuesta)
+        btn_v.pack(pady=15)
 
-    tk.Button(card_rec, text="BUSCAR PREGUNTA", font=("Segoe UI", 9, "bold"), bg=COLOR_PRIMARY_RED, fg=COLOR_TEXT_MAIN, bd=0, command=paso_2).pack(pady=15, ipady=5, width=180)
+    btn_buscar = RoundedButton(card_rec, text="BUSCAR PREGUNTA", radius=RADIO_BOTON, width=200, height=36,
+                                font=("Segoe UI", 9, "bold"), command=paso_2)
+    btn_buscar.pack(pady=15)
 
 
 def configuring_efecto_hover(boton, color_normal, color_hover):
@@ -392,11 +513,12 @@ def mostrar_personalizacion():
         widget.destroy()
     
     # Botón X
-    btn_x = tk.Button(contenedor_principal, text="X", font=("Arial", 10), bg=COLOR_PRIMARY_RED, fg="white", bd=0, command=mostrar_lobby)
+    btn_x = RoundedButton(contenedor_principal, text="X", radius=14, width=30, height=30, font=("Arial", 10),
+                           command=mostrar_lobby)
     btn_x.place(relx=1.0, rely=0.0, x=-10, y=10, anchor="ne")
     
     btn_settings.config(command=mostrar_lobby)
-    contenedor_principal.place(relx=0.5, rely=0.5, anchor="center", width=450, height=450)
+    canvas_tarjeta_principal.place(relx=0.5, rely=0.5, anchor="center", width=506, height=506)
 
     tk.Label(contenedor_principal, text="PERSONALIZACIÓN", font=("Segoe UI", 16, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=(30, 20))
     tk.Label(contenedor_principal, text="1. Elige tu Color Base", font=("Segoe UI", 9), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD).pack(anchor="w", padx=40)
@@ -409,14 +531,15 @@ def mostrar_personalizacion():
             color_actual.set(c)
             btn_sphere.config(highlightbackground=c)
 
-    btn_sphere = tk.Button(contenedor_principal, text="🎨", font=("Segoe UI", 24), bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, 
-                           highlightbackground=COLOR_PRIMARY_RED, highlightthickness=4, bd=0, cursor="hand2", 
-                           command=cambiar_color, width=6, height=3)
+    btn_sphere = RoundedButton(contenedor_principal, text="🎨", radius=60, width=120, height=120,
+                               font=("Segoe UI", 24), bg_color=COLOR_INPUT_BG, hover_color=COLOR_INPUT_BG,
+                               outline_color=COLOR_PRIMARY_RED, outline_width=4, command=cambiar_color)
     btn_sphere.pack(pady=20)
 
-    btn_apply = tk.Button(contenedor_principal, text="APLICAR CAMBIOS", font=("Segoe UI", 10, "bold"), bg=COLOR_PRIMARY_RED, fg=COLOR_TEXT_MAIN, bd=0, command=lambda: messagebox.showinfo("Éxito", f"Paleta actualizada a {color_actual.get()}"))
-    btn_apply.pack(fill="x", padx=40, ipady=10, pady=20)
-    configuring_efecto_hover(btn_apply, COLOR_PRIMARY_RED, "#ff3333")
+    btn_apply = RoundedButton(contenedor_principal, text="APLICAR CAMBIOS", radius=RADIO_BOTON, height=46,
+                               font=("Segoe UI", 10, "bold"),
+                               command=lambda: messagebox.showinfo("Éxito", f"Paleta actualizada a {color_actual.get()}"))
+    btn_apply.pack(fill="x", padx=40, pady=20)
 
 
 # --- VISTA: LOBBY PRINCIPAL ---
@@ -428,23 +551,24 @@ def mostrar_lobby():
     for widget in contenedor_principal.winfo_children():
         widget.destroy()
         
-    contenedor_principal.place(relx=0.5, rely=0.5, anchor="center", width=500, height=430)
+    canvas_tarjeta_principal.place(relx=0.5, rely=0.5, anchor="center", width=556, height=486)
     btn_settings.config(command=abrir_modal_configuracion)
 
     tk.Label(contenedor_principal, text="AVATARS VS ROOKS", font=("Segoe UI", 20, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=(40, 2))
     tk.Label(contenedor_principal, text="BIENVENIDO, USUARIO", font=("Segoe UI", 11, "bold"), fg=COLOR_TEXT_MAIN, bg=COLOR_SURFACE_CARD).pack(pady=(0, 40))
 
-    btn_pers = tk.Button(contenedor_principal, text="PERSONALIZACIÓN", font=("Segoe UI", 11, "bold"), bg=COLOR_PRIMARY_RED, fg=COLOR_TEXT_MAIN, bd=0, cursor="hand2", command=mostrar_personalizacion)
-    btn_pers.pack(fill="x", padx=35, ipady=10, pady=8)
-    configuring_efecto_hover(btn_pers, COLOR_PRIMARY_RED, "#ff3333")
+    btn_pers = RoundedButton(contenedor_principal, text="PERSONALIZACIÓN", radius=RADIO_BOTON, height=46,
+                              font=("Segoe UI", 11, "bold"), command=mostrar_personalizacion)
+    btn_pers.pack(fill="x", padx=35, pady=8)
 
-    btn_offline = tk.Button(contenedor_principal, text="JUEGO OFFLINE", font=("Segoe UI", 11, "bold"), bg=COLOR_PRIMARY_RED, fg=COLOR_TEXT_MAIN, bd=0, cursor="hand2", command=lambda: messagebox.showinfo("Offline", f"Iniciando Juego Offline...\nDificultad: {config_dificultad} | Tiempo: {config_tiempo}"))
-    btn_offline.pack(fill="x", padx=35, ipady=10, pady=8)
-    configuring_efecto_hover(btn_offline, COLOR_PRIMARY_RED, "#ff3333")
+    btn_offline = RoundedButton(contenedor_principal, text="JUEGO OFFLINE", radius=RADIO_BOTON, height=46,
+                                 font=("Segoe UI", 11, "bold"),
+                                 command=lambda: messagebox.showinfo("Offline", f"Iniciando Juego Offline...\nDificultad: {config_dificultad} | Tiempo: {config_tiempo}"))
+    btn_offline.pack(fill="x", padx=35, pady=8)
 
-    btn_online = tk.Button(contenedor_principal, text="JUEGO ONLINE", font=("Segoe UI", 11, "bold"), bg=COLOR_PRIMARY_RED, fg=COLOR_TEXT_MAIN, bd=0, cursor="hand2", command=mostrar_login)
-    btn_online.pack(fill="x", padx=35, ipady=10, pady=8)
-    configuring_efecto_hover(btn_online, COLOR_PRIMARY_RED, "#ff3333")
+    btn_online = RoundedButton(contenedor_principal, text="JUEGO ONLINE", radius=RADIO_BOTON, height=46,
+                                font=("Segoe UI", 11, "bold"), command=mostrar_login)
+    btn_online.pack(fill="x", padx=35, pady=8)
     
     maximizar_ventana(ventana)
 
@@ -453,22 +577,26 @@ def abrir_modal_configuracion():
     global config_dificultad, config_tiempo
     modal = tk.Toplevel(ventana)
     modal.title("Configuración")
-    modal.geometry("340x250")
-    modal.configure(bg=COLOR_SURFACE_CARD)
+    modal.geometry("340x260")
+    modal.configure(bg=COLOR_DEEP_BG)
     modal.resizable(False, False)
     modal.transient(ventana)
     modal.grab_set()
+
+    canvas_modal, modal_card = crear_tarjeta_redondeada(modal, radio=RADIO_TARJETA)
+    canvas_modal.place(relx=0.5, rely=0.5, anchor="center", width=340, height=260)
     
     # Botón X
-    btn_x = tk.Button(modal, text="X", font=("Arial", 10), bg=COLOR_PRIMARY_RED, fg="white", bd=0, command=modal.destroy)
+    btn_x = RoundedButton(modal, text="X", radius=14, width=30, height=30, font=("Arial", 10),
+                           canvas_bg=COLOR_DEEP_BG, command=modal.destroy)
     btn_x.place(relx=1.0, rely=0.0, x=-10, y=10, anchor="ne")
     
     x = ventana.winfo_x() + (ventana.winfo_width() // 2) - 170
     y = ventana.winfo_y() + (ventana.winfo_height() // 2) - 150
     modal.geometry(f"+{x}+{y}")
 
-    tk.Label(modal, text="CONFIGURACIÓN", font=("Segoe UI", 12, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=(15, 10))
-    tk.Label(modal, text="Nivel de Dificultad", font=("Segoe UI", 9), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD).pack(anchor="w", padx=30, pady=(5, 2))
+    tk.Label(modal_card, text="CONFIGURACIÓN", font=("Segoe UI", 12, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=(15, 10))
+    tk.Label(modal_card, text="Nivel de Dificultad", font=("Segoe UI", 9), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD).pack(anchor="w", padx=30, pady=(5, 2))
     
     def actualizar_config(event):
         global config_dificultad, config_tiempo
@@ -480,14 +608,14 @@ def abrir_modal_configuracion():
         elif config_dificultad == "Difícil":
             config_tiempo = "2 minutos"
 
-    combo_dif = ttk.Combobox(modal, values=["Fácil", "Medio", "Difícil"], state="readonly", font=("Segoe UI", 10))
+    combo_dif = ttk.Combobox(modal_card, values=["Fácil", "Medio", "Difícil"], state="readonly", font=("Segoe UI", 10))
     combo_dif.set(config_dificultad)
     combo_dif.bind("<<ComboboxSelected>>", actualizar_config)
     combo_dif.pack(fill="x", padx=30)
 
-    btn_cerrar = tk.Button(modal, text="GUARDAR Y CERRAR", font=("Segoe UI", 9, "bold"), bg=COLOR_PRIMARY_RED, fg=COLOR_TEXT_MAIN, bd=0, cursor="hand2", command=modal.destroy)
-    btn_cerrar.config(width=20)
-    btn_cerrar.pack(pady=25, ipady=6)
+    btn_cerrar = RoundedButton(modal_card, text="GUARDAR Y CERRAR", radius=RADIO_BOTON, width=220, height=38,
+                                font=("Segoe UI", 9, "bold"), command=modal.destroy)
+    btn_cerrar.pack(pady=25)
 
 
 # --- VISTA: INICIO DE SESIÓN ---
@@ -515,16 +643,17 @@ def mostrar_login():
             "Nota: El sistema se bloqueará por 3 minutos tras 3 intentos fallidos."
         )
 
-    btn_help = tk.Button(frame_top_buttons, text="?", font=("Arial", 10, "bold"), bg=COLOR_INPUT_BG, fg="white", bd=0, width=3, height=1)
-    btn_help.config(command=mostrar_ayuda_login)
+    btn_help = RoundedButton(frame_top_buttons, text="?", radius=10, width=28, height=28, font=("Arial", 10, "bold"),
+                              bg_color=COLOR_INPUT_BG, hover_color="#46566e", command=mostrar_ayuda_login)
     btn_help.pack(side="left", padx=1)
 
-    btn_x = tk.Button(frame_top_buttons, text="X", font=("Arial", 10, "bold"), bg=COLOR_PRIMARY_RED, fg="white", bd=0, width=3, height=1, command=mostrar_lobby)
+    btn_x = RoundedButton(frame_top_buttons, text="X", radius=10, width=28, height=28, font=("Arial", 10, "bold"),
+                           command=mostrar_lobby)
     btn_x.pack(side="left", padx=1)
 
     btn_settings.config(command=mostrar_lobby)
 
-    contenedor_principal.place(relx=0.5, rely=0.5, anchor="center", width=500, height=530)
+    canvas_tarjeta_principal.place(relx=0.5, rely=0.5, anchor="center", width=556, height=586)
 
     lbl_title = tk.Label(contenedor_principal, text="AVATARS VS ROOKS", font=("Segoe UI", 18, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD)
     lbl_title.pack(pady=(20, 2))
@@ -536,7 +665,7 @@ def mostrar_login():
     frame_user.pack(fill="x", padx=30, pady=5)
     tk.Label(frame_user, text="Nombre de Usuario", font=("Segoe UI", 8), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD).pack(anchor="w", padx=5)
     entry_usuario = tk.Entry(frame_user, font=("Segoe UI", 11), bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, bd=0, insertbackground=COLOR_TEXT_MAIN, highlightthickness=1, highlightbackground=COLOR_TEXT_SEC, highlightcolor=COLOR_PRIMARY_RED)
-    entry_usuario.pack(fill="x", ipady=6, pady=3)
+    entry_usuario.pack(fill="x", ipady=8, pady=3)
 
     frame_pass = tk.Frame(contenedor_principal, bg=COLOR_SURFACE_CARD)
     frame_pass.pack(fill="x", padx=30, pady=5)
@@ -546,23 +675,27 @@ def mostrar_login():
     frame_p_input = tk.Frame(frame_pass, bg=COLOR_SURFACE_CARD)
     frame_p_input.pack(fill="x")
     entry_password = tk.Entry(frame_p_input, font=("Segoe UI", 11), bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, bd=0, show="*", insertbackground=COLOR_TEXT_MAIN)
-    entry_password.pack(side="left", fill="x", expand=True, ipady=6, pady=3)
-    btn_ojito = tk.Button(frame_p_input, text="👁", bg=COLOR_INPUT_BG, fg=COLOR_TEXT_SEC, bd=0, command=lambda: toggle_password(entry_password))
+    entry_password.pack(side="left", fill="x", expand=True, ipady=8, pady=3)
+    btn_ojito = RoundedButton(frame_p_input, text="👁", radius=10, width=32, height=28, font=("Segoe UI", 10),
+                               bg_color=COLOR_INPUT_BG, hover_color="#46566e", canvas_bg=COLOR_SURFACE_CARD,
+                               command=lambda: toggle_password(entry_password))
     btn_ojito.pack(side="right", padx=5)
 
-    btn_login = tk.Button(contenedor_principal, text="INICIAR SESIÓN", font=("Segoe UI", 11, "bold"), bg=COLOR_PRIMARY_RED, fg=COLOR_TEXT_MAIN, bd=0, cursor="hand2", command=lambda: intentar_login(entry_usuario, entry_password))
-    btn_login.pack(fill="x", padx=30, ipady=8, pady=(20, 5))
-    configuring_efecto_hover(btn_login, COLOR_PRIMARY_RED, "#ff3333")
+    btn_login = RoundedButton(contenedor_principal, text="INICIAR SESIÓN", radius=RADIO_BOTON, height=44,
+                               font=("Segoe UI", 11, "bold"), command=lambda: intentar_login(entry_usuario, entry_password))
+    btn_login.pack(fill="x", padx=30, pady=(20, 5))
 
-    btn_facial = tk.Button(contenedor_principal, text="Ingresar con Rostro 📷", font=("Segoe UI", 9), bg=COLOR_SURFACE_CARD, fg=COLOR_TEXT_SEC, activebackground="#384459", activeforeground=COLOR_TEXT_MAIN, bd=1, relief="solid", cursor="hand2", highlightbackground=COLOR_TEXT_SEC, command=lambda: login_con_rostro(al_reconocer))
-    btn_facial.pack(fill="x", padx=30, ipady=5, pady=5)
-    configuring_efecto_hover(btn_facial, COLOR_SURFACE_CARD, "#3d4a60")
+    btn_facial = RoundedButton(contenedor_principal, text="Ingresar con Rostro 📷", radius=RADIO_BOTON, height=36,
+                                font=("Segoe UI", 9), bg_color=COLOR_SURFACE_CARD, fg_color=COLOR_TEXT_SEC,
+                                hover_color="#3d4a60", outline_color=COLOR_TEXT_SEC, outline_width=1,
+                                command=lambda: login_con_rostro(al_reconocer))
+    btn_facial.pack(fill="x", padx=30, pady=5)
 
     tk.Label(contenedor_principal, text="¿Eres nuevo? Regístrate aquí", font=("Segoe UI", 8), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD).pack(pady=(15, 0))
 
-    btn_go_register = tk.Button(contenedor_principal, text="REGISTRARSE", font=("Segoe UI", 10, "bold"), bg=COLOR_PRIMARY_RED, fg=COLOR_TEXT_MAIN, bd=0, cursor="hand2", command=mostrar_registro)
-    btn_go_register.pack(fill="x", padx=30, ipady=6, pady=5)
-    configuring_efecto_hover(btn_go_register, COLOR_PRIMARY_RED, "#ff3333")
+    btn_go_register = RoundedButton(contenedor_principal, text="REGISTRARSE", radius=RADIO_BOTON, height=38,
+                                     font=("Segoe UI", 10, "bold"), command=mostrar_registro)
+    btn_go_register.pack(fill="x", padx=30, pady=5)
 
     lbl_forgot = tk.Label(contenedor_principal, text="¿Olvidaste tu contraseña?", font=("Segoe UI", 9, "underline"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD, cursor="hand2")
     lbl_forgot.pack(pady=(5, 10))
@@ -584,7 +717,7 @@ def mostrar_registro():
     for widget in contenedor_principal.winfo_children():
         widget.destroy()
 
-    contenedor_principal.place(relx=0.5, rely=0.5, anchor="center", width=460, height=680)
+    canvas_tarjeta_principal.place(relx=0.5, rely=0.5, anchor="center", width=516, height=736)
 
     # --- IMPLEMENTACIÓN DE CANVAS CON SCROLLBAR PARA EL FORMULARIO ---
     canvas = tk.Canvas(contenedor_principal, bg=COLOR_SURFACE_CARD, bd=0, highlightthickness=0)
@@ -596,7 +729,7 @@ def mostrar_registro():
     def actualizar_scroll(event):
         canvas.configure(scrollregion=canvas.bbox("all"))
         
-    window_id = canvas.create_window((0, 0), window=frame_contenido, anchor="nw", width=440)
+    window_id = canvas.create_window((0, 0), window=frame_contenido, anchor="nw", width=400)
     canvas.configure(yscrollcommand=scrollbar.set)
     
     # Empaquetado de la estructura del scrollbar
@@ -658,11 +791,12 @@ def mostrar_registro():
             "8. Términos: Haga clic obligatoriamente en 'Leer términos y condiciones' para habilitar la casilla 'Acepto'."
         )
 
-    btn_help = tk.Button(frame_top_buttons, text="?", font=("Arial", 10, "bold"), bg=COLOR_INPUT_BG, fg="white", bd=0, width=3, height=1)
-    btn_help.config(command=mostrar_ayuda_registro)
+    btn_help = RoundedButton(frame_top_buttons, text="?", radius=10, width=28, height=28, font=("Arial", 10, "bold"),
+                              bg_color=COLOR_INPUT_BG, hover_color="#46566e", command=mostrar_ayuda_registro)
     btn_help.pack(side="left", padx=1)
 
-    btn_x = tk.Button(frame_top_buttons, text="X", font=("Arial", 10, "bold"), bg=COLOR_PRIMARY_RED, fg="white", bd=0, width=3, height=1, command=lambda: [_unbind_mousewheel(), mostrar_login()])
+    btn_x = RoundedButton(frame_top_buttons, text="X", radius=10, width=28, height=28, font=("Arial", 10, "bold"),
+                           command=lambda: [_unbind_mousewheel(), mostrar_login()])
     btn_x.pack(side="left", padx=1)
 
     tk.Label(frame_contenido, text="CREAR CUENTA", font=("Segoe UI", 14, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=(8, 2))
@@ -682,9 +816,10 @@ def mostrar_registro():
         if registrar_rostro(user):
             lbl_photo_status.config(text="📷 ¡Rostro Vinculado!", fg="#00ff00")
 
-    btn_photo = tk.Button(frame_inner_photo, text="Usar Foto 📷", font=("Segoe UI", 8, "bold"), bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, bd=1, relief="solid", cursor="hand2", command=ejecutar_captura)
-    btn_photo.pack(side="right", ipady=2, padx=2)
-    configuring_efecto_hover(btn_photo, COLOR_INPUT_BG, COLOR_PRIMARY_RED)
+    btn_photo = RoundedButton(frame_inner_photo, text="Usar Foto 📷", radius=12, width=130, height=30,
+                               font=("Segoe UI", 8, "bold"), bg_color=COLOR_INPUT_BG, fg_color=COLOR_TEXT_MAIN,
+                               hover_color=COLOR_PRIMARY_RED, canvas_bg=COLOR_SURFACE_CARD, command=ejecutar_captura)
+    btn_photo.pack(side="right", padx=2)
 
     def crear_fila_input(label_text, is_password=False, placeholder=""):
         frame = tk.Frame(frame_contenido, bg=COLOR_SURFACE_CARD)
@@ -696,7 +831,9 @@ def mostrar_registro():
             frame_p.pack(fill="x")
             entry = tk.Entry(frame_p, font=("Segoe UI", 10), bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, bd=0, show="*", insertbackground=COLOR_TEXT_MAIN)
             entry.pack(side="left", fill="x", expand=True, ipady=3, pady=1)
-            btn_ojito = tk.Button(frame_p, text="👁", bg=COLOR_INPUT_BG, fg=COLOR_TEXT_SEC, bd=0, command=lambda: toggle_password(entry))
+            btn_ojito = RoundedButton(frame_p, text="👁", radius=10, width=32, height=28, font=("Segoe UI", 10),
+                                       bg_color=COLOR_INPUT_BG, hover_color="#46566e", canvas_bg=COLOR_SURFACE_CARD,
+                                       command=lambda: toggle_password(entry))
             btn_ojito.pack(side="right", padx=5)
         else:
             entry = tk.Entry(frame, font=("Segoe UI", 10), bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, bd=0, insertbackground=COLOR_TEXT_MAIN, highlightthickness=1, highlightbackground=COLOR_TEXT_SEC, highlightcolor=COLOR_PRIMARY_RED)
@@ -858,7 +995,9 @@ def mostrar_registro():
     ent_tarjeta.bind("<Control-v>", lambda e: "break")
     ent_tarjeta.bind("<Control-V>", lambda e: "break")
 
-    btn_ojo_tarjeta = tk.Button(frame_tarjeta_input, text="👁", bg=COLOR_INPUT_BG, fg=COLOR_TEXT_SEC, bd=0, command=toggle_tarjeta)
+    btn_ojo_tarjeta = RoundedButton(frame_tarjeta_input, text="👁", radius=10, width=32, height=28, font=("Segoe UI", 10),
+                                     bg_color=COLOR_INPUT_BG, hover_color="#46566e", canvas_bg=COLOR_SURFACE_CARD,
+                                     command=toggle_tarjeta)
     btn_ojo_tarjeta.pack(side="right", padx=5)
 
     _ent_tarjeta_original_get = ent_tarjeta.get
@@ -937,9 +1076,9 @@ def mostrar_registro():
         _unbind_mousewheel()
         mostrar_login()
 
-    btn_submit = tk.Button(frame_contenido, text="COMPLETAR REGISTRO", font=("Segoe UI", 11, "bold"), bg=COLOR_PRIMARY_RED, fg=COLOR_TEXT_MAIN, bd=0, cursor="hand2", command=ejecutar_registro_final)
-    btn_submit.pack(fill="x", padx=25, ipady=5, pady=(5, 15))
-    configuring_efecto_hover(btn_submit, COLOR_PRIMARY_RED, "#ff3333")
+    btn_submit = RoundedButton(frame_contenido, text="COMPLETAR REGISTRO", radius=RADIO_BOTON, height=44,
+                                font=("Segoe UI", 11, "bold"), command=ejecutar_registro_final)
+    btn_submit.pack(fill="x", padx=25, pady=(5, 15))
 
     lbl_back = tk.Label(frame_contenido, text="← Volver al inicio de sesión", font=("Segoe UI", 9, "underline"), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD, cursor="hand2")
     lbl_back.pack(pady=(2, 15))
@@ -996,7 +1135,8 @@ def manejar_backspace(event):
 # Vincular la tecla BackSpace a nivel de ventana global de forma segura
 ventana.bind("<BackSpace>", manejar_backspace)
 
-btn_settings = tk.Button(ventana, text="⚙", font=("Arial", 16), bg=COLOR_PRIMARY_RED, fg=COLOR_TEXT_MAIN, activebackground="#cc1111", activeforeground=COLOR_TEXT_MAIN, bd=0, width=2, height=1, cursor="hand2")
+btn_settings = RoundedButton(ventana, text="⚙", radius=22, width=45, height=45, font=("Arial", 16),
+                              bg_color=COLOR_PRIMARY_RED, hover_color="#cc1111", canvas_bg=COLOR_DEEP_BG)
 btn_settings.place(x=25, y=25)
 
 lbl_music = tk.Label(ventana, text="🎵 Melodía: Tensión y Adrenalina", font=("Segoe UI", 8), fg=COLOR_TEXT_SEC, bg=COLOR_DEEP_BG)
@@ -1006,8 +1146,7 @@ lbl_lang = tk.Label(ventana, text="ES | EN", font=("Segoe UI", 9, "bold"), fg=CO
 lbl_lang.place(relx=1.0, rely=1.0, x=-25, y=-25, anchor="se")
 
 
-contenedor_principal = tk.Frame(ventana, bg=COLOR_SURFACE_CARD, bd=1, relief="solid", highlightthickness=0)
-contenedor_principal.config(highlightbackground="#4a5568") 
+canvas_tarjeta_principal, contenedor_principal = crear_tarjeta_redondeada(ventana, radio=RADIO_TARJETA)
 
 mostrar_lobby()
 
