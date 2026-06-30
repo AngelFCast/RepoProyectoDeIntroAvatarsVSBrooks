@@ -1005,14 +1005,6 @@ lbl_music.place(relx=0.0, rely=1.0, x=25, y=-25, anchor="sw")
 lbl_lang = tk.Label(ventana, text="ES | EN", font=("Segoe UI", 9, "bold"), fg=COLOR_TEXT_SEC, bg=COLOR_DEEP_BG)
 lbl_lang.place(relx=1.0, rely=1.0, x=-25, y=-25, anchor="se")
 
-contenedor_principal = tk.Frame(ventana, bg=COLOR_SURFACE_CARD, bd=1, relief="solid", highlightthickness=0)
-contenedor_principal.config(highlightbackground="#4a5568") 
-
-mostrar_lobby()
-
-ventana.after(100, lambda: maximizar_ventana(ventana))
-ventana.mainloop()
-# ... Todo tu código anterior de las vistas y el contenedor ...
 
 contenedor_principal = tk.Frame(ventana, bg=COLOR_SURFACE_CARD, bd=1, relief="solid", highlightthickness=0)
 contenedor_principal.config(highlightbackground="#4a5568") 
