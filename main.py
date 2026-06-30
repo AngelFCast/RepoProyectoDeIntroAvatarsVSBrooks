@@ -438,7 +438,7 @@ def recover_password():
     ventana_rec.configure(bg=COLOR_DEEP_BG)
     
     ventana_rec.resizable(True, True)
-    maximizar_ventana(ventana_rec)
+    ventana_rec.withdraw()
     
     # Botón X
     btn_x = RoundedButton(ventana_rec, text="X", radius=18, width=36, height=36, font=("Arial", 11, "bold"),
@@ -486,6 +486,9 @@ def recover_password():
     btn_buscar = RoundedButton(card_rec, text="BUSCAR PREGUNTA", radius=RADIO_BOTON, width=200, height=36,
                                 font=("Segoe UI", 9, "bold"), command=paso_2)
     btn_buscar.pack(pady=15)
+
+    ventana_rec.deiconify()
+    maximizar_ventana(ventana_rec)
 
 
 def configuring_efecto_hover(boton, color_normal, color_hover):
@@ -581,15 +584,10 @@ def abrir_modal_configuracion():
     modal.configure(bg=COLOR_DEEP_BG)
     modal.resizable(False, False)
     modal.transient(ventana)
-    modal.grab_set()
+    modal.withdraw()
 
     canvas_modal, modal_card = crear_tarjeta_redondeada(modal, radio=RADIO_TARJETA)
     canvas_modal.place(relx=0.5, rely=0.5, anchor="center", width=340, height=260)
-    
-    # Botón X
-    btn_x = RoundedButton(modal, text="X", radius=14, width=30, height=30, font=("Arial", 10),
-                           canvas_bg=COLOR_DEEP_BG, command=modal.destroy)
-    btn_x.place(relx=1.0, rely=0.0, x=-10, y=10, anchor="ne")
     
     x = ventana.winfo_x() + (ventana.winfo_width() // 2) - 170
     y = ventana.winfo_y() + (ventana.winfo_height() // 2) - 150
@@ -616,6 +614,11 @@ def abrir_modal_configuracion():
     btn_cerrar = RoundedButton(modal_card, text="GUARDAR Y CERRAR", radius=RADIO_BOTON, width=220, height=38,
                                 font=("Segoe UI", 9, "bold"), command=modal.destroy)
     btn_cerrar.pack(pady=25)
+
+    modal.update_idletasks()
+    modal.deiconify()
+    modal.wait_visibility()
+    modal.grab_set()
 
 
 # --- VISTA: INICIO DE SESIÓN ---
