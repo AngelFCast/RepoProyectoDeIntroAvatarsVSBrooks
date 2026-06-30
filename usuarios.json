@@ -1,0 +1,62 @@
+{
+    "UsuarioPrueba": {
+        "password": "Password1",
+        "nombre": "Ususario Prueba",
+        "fecha_nacimiento": "06/06/1666",
+        "genero": "Masculino",
+        "hobbies": [
+            "Ajedrez",
+            "Lectura",
+            "C\u00f3digo"
+        ],
+        "pregunta_seguridad": "\u00bfCu\u00e1l es el mejor equipo de f\u00fatbol de CR?",
+        "respuesta_seguridad": "comedia",
+        "tarjeta_membresia": "**** **** **** 1111",
+        "vencimiento_tarjeta": "01/07/2027"
+    },
+    "FoxXxito": {
+        "password": "Password1",
+        "nombre": "Jorshan QUesada",
+        "fecha_nacimiento": "14/09/2008",
+        "genero": "Femenino",
+        "hobbies": [
+            "M\u00fasica",
+            "Ajedrez",
+            "C\u00f3digo"
+        ],
+        "pregunta_seguridad": "\u00bfCu\u00e1l fue el primer nombre de su mascota?",
+        "respuesta_seguridad": "Dios",
+        "tarjeta_membresia": "**** **** **** 1111",
+        "vencimiento_tarjeta": "06/06/2029"
+    },
+    "aftercatta": {
+        "password": "Password1",
+        "nombre": "Angel Fallas",
+        "fecha_nacimiento": "29/06/2026",
+        "genero": "Masculino",
+        "hobbies": [
+            "Dibujo",
+            "Lectura",
+            "Deportes"
+        ],
+        "pregunta_seguridad": "\u00bfCu\u00e1l es la mejor carrera de la UCR?",
+        "respuesta_seguridad": "senegal",
+        "tarjeta_membresia": "**** **** **** 1111",
+        "vencimiento_tarjeta": "29/06/2026"
+    },
+    "aftercatta2": {
+        "password": "Password1",
+        "nombre": "hola que hace",
+        "fecha_nacimiento": "29/06/2026",
+        "genero": "Masculino",
+        "hobbies": [
+            "Dibujo",
+            "Lectura",
+            "Deportes"
+        ],
+        "pregunta_seguridad": "\u00bfCu\u00e1l fue el primer nombre de su mascota?",
+        "respuesta_seguridad": "dios",
+        "tarjeta_membresia": "**** **** **** 7777",
+        "vencimiento_tarjeta": "29/06/2026"
+    }
+}
