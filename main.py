@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox, colorchooser
+from tkinter import messagebox, filedialog
 from tkinter import ttk
 import cv2
 import os
@@ -641,7 +641,7 @@ def guardar_usuarios_db(data):
     with open(USERS_JSON, "w") as f:
         json.dump(data, f, indent=4)
 
-def guardar_nuevo_usuario(username, password, nombre, fecha_nac, genero, hobbies, pregunta, respuesta, tarjeta, vencimiento_tarjeta):
+def guardar_nuevo_usuario(username, password, nombre, fecha_nac, genero, hobbies, pregunta, respuesta, tarjeta, vencimiento_tarjeta, foto_perfil=None):
     usuarios = cargar_usuarios()
     if username in usuarios:
         return False
@@ -658,10 +658,112 @@ def guardar_nuevo_usuario(username, password, nombre, fecha_nac, genero, hobbies
         "pregunta_seguridad": pregunta,
         "respuesta_seguridad": respuesta,
         "tarjeta_membresia": tarjeta_censurada,
-        "vencimiento_tarjeta": vencimiento_tarjeta
+        "vencimiento_tarjeta": vencimiento_tarjeta,
+        "foto_perfil": foto_perfil
     }
     guardar_usuarios_db(usuarios)
     return True
+
+
+# --- FOTO DE PERFIL (AVATAR CIRCULAR ESTILO WHATSAPP) ---
+# Solo se permite SUBIR un archivo (sin opción de "tomar foto" para el avatar).
+# Tras subir la foto válida, se intenta vincular el rostro automáticamente
+# usando la cámara (si el equipo tiene una), para el sistema de login facial.
+
+PROFILE_PICS_DIR = os.path.join(BASE_DIR, "users_fotos")
+if not os.path.exists(PROFILE_PICS_DIR):
+    os.makedirs(PROFILE_PICS_DIR)
+
+EXTENSIONES_FOTO_VALIDAS = (".png", ".jpg", ".jpeg")
+TAMANO_MAXIMO_FOTO_BYTES = 1 * 1024 * 1024  # 1 MB
+
+
+def validar_archivo_foto(ruta_archivo):
+    """Valida extensión (png/jpg/jpeg) y peso (<1MB) de la foto de perfil.
+    Devuelve (ok: bool, mensaje_error: str|None)."""
+    ext = os.path.splitext(ruta_archivo)[1].lower()
+    if ext not in EXTENSIONES_FOTO_VALIDAS:
+        return False, "Solo se aceptan archivos PNG, JPG o JPEG."
+    try:
+        peso = os.path.getsize(ruta_archivo)
+    except OSError:
+        return False, "No se pudo leer el archivo seleccionado."
+    if peso <= 0:
+        return False, "El archivo seleccionado está vacío o dañado."
+    if peso > TAMANO_MAXIMO_FOTO_BYTES:
+        return False, "La foto debe pesar menos de 1 MB."
+    return True, None
+
+
+def _leer_imagen_bgr(ruta_archivo):
+    """Lee una imagen desde disco de forma segura (soporta rutas con tildes/ñ)."""
+    datos = np.fromfile(ruta_archivo, dtype=np.uint8)
+    img = cv2.imdecode(datos, cv2.IMREAD_COLOR)
+    return img
+
+
+def _recortar_cuadrado(img, lado_destino):
+    h, w = img.shape[:2]
+    recorte_lado = min(h, w)
+    y0 = (h - recorte_lado) // 2
+    x0 = (w - recorte_lado) // 2
+    recorte = img[y0:y0 + recorte_lado, x0:x0 + recorte_lado]
+    return cv2.resize(recorte, (lado_destino, lado_destino), interpolation=cv2.INTER_AREA)
+
+
+def crear_avatar_circular_png(ruta_archivo, diametro=110):
+    """Genera una imagen circular (con esquinas transparentes) lista para
+    mostrarse en un tk.Canvas, estilo foto de perfil de WhatsApp."""
+    try:
+        img = _leer_imagen_bgr(ruta_archivo)
+        if img is None:
+            return None
+        cuadrado = _recortar_cuadrado(img, diametro)
+        bgra = cv2.cvtColor(cuadrado, cv2.COLOR_BGR2BGRA)
+
+        yy, xx = np.ogrid[:diametro, :diametro]
+        cx = cy = diametro / 2
+        radio = diametro / 2
+        mascara = (xx - cx) ** 2 + (yy - cy) ** 2 <= radio ** 2
+        bgra[..., 3] = np.where(mascara, 255, 0).astype(np.uint8)
+
+        ok, buffer = cv2.imencode(".png", bgra)
+        if not ok:
+            return None
+        return tk.PhotoImage(data=buffer.tobytes())
+    except Exception as e:
+        print(f"No se pudo generar el avatar circular: {e}")
+        return None
+
+
+def guardar_foto_perfil_usuario(username, ruta_origen, lado=256):
+    """Recorta la foto a cuadrado, la reduce a un tamaño razonable y la
+    guarda en disco asociada al usuario. Devuelve el nombre del archivo
+    guardado (para el JSON) o None si falla."""
+    try:
+        img = _leer_imagen_bgr(ruta_origen)
+        if img is None:
+            return None
+        cuadrado = _recortar_cuadrado(img, lado)
+        nombre_archivo = f"{username}.png"
+        ruta_destino = os.path.join(PROFILE_PICS_DIR, nombre_archivo)
+        cv2.imwrite(ruta_destino, cuadrado)
+        return nombre_archivo
+    except Exception as e:
+        print(f"No se pudo guardar la foto de perfil: {e}")
+        return None
+
+
+def hay_camara_disponible():
+    """Comprueba rápidamente si el equipo tiene una cámara accesible, sin
+    dejarla abierta ni mostrar ninguna ventana."""
+    try:
+        cap = cv2.VideoCapture(0)
+        disponible = cap.isOpened()
+        cap.release()
+        return disponible
+    except Exception:
+        return False
 
 
 # --- RECONOCIMIENTO FACIAL ---
@@ -681,33 +783,31 @@ def cargar_rostros_conocidos():
     return encodings, nombres
 
 
-def registrar_rostro(username):
-    if not username.strip():
-        messagebox.showwarning("Falta información", "Escribe un nombre de usuario primero para asociar tu rostro.")
-        return False
-
+def capturar_muestras_rostro(titulo_ventana="Escaneo Facial 2D", mostrar_aviso=True):
+    """Abre la cámara y captura 10 muestras del rostro, SIN pedir ni requerir
+    un username todavía. Devuelve el vector promedio (numpy array) o None si
+    falla / no hay cámara / no se detectó rostro."""
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        messagebox.showerror("Error", "Cámara no disponible.")
-        return False
-        
+        return None
+
     cascade = cv2.CascadeClassifier(CASCADE_PATH)
-    muestras = []   
+    muestras = []
     contador = 0
 
-    messagebox.showinfo(
-        "Escaneo Facial 2D",
-        "Se abrirá la cámara de juego. Mira fijamente al lente.\n"
-        "Se tomarán 10 muestras automáticamente."
-    )
+    if mostrar_aviso:
+        messagebox.showinfo(
+            titulo_ventana,
+            "Se abrirá la cámara de juego. Mira fijamente al lente.\n"
+            "Se tomarán 10 muestras automáticamente."
+        )
 
     while True:
         ret, frame = cap.read()
         if not ret:
-            messagebox.showerror("Error", "No se pudo acceder a la cámara.")
             cap.release()
             cv2.destroyAllWindows()
-            return False
+            return None
 
         gris = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         caras = cascade.detectMultiScale(gris, 1.3, 5)
@@ -718,7 +818,7 @@ def registrar_rostro(username):
             contador += 1
 
             cv2.rectangle(frame, (x, y), (x+w, y+h), (244, 21, 21), 2)
-            cv2.putText(frame, f"Captura {contador}/10", (x, y - 10), 
+            cv2.putText(frame, f"Captura {contador}/10", (x, y - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         if contador == 1:
@@ -733,15 +833,40 @@ def registrar_rostro(username):
     cap.release()
     cv2.destroyAllWindows()
 
-    if muestras:
-        vector_promedio = np.mean(muestras, axis=0)
-        ruta = os.path.join(USERS_DIR, f"{username}.npy")
-        np.save(ruta, vector_promedio)
-        messagebox.showinfo("Éxito", f"¡Rostro de '{username}' vinculado perfectamente!")
-        return True
-    else:
+    if not muestras:
+        return None
+    return np.mean(muestras, axis=0)
+
+
+def guardar_vector_rostro(username, vector_rostro):
+    """Guarda en disco un vector de rostro ya capturado, asociado a un
+    username (que en este punto sí debe existir)."""
+    if not username.strip() or vector_rostro is None:
+        return False
+    ruta = os.path.join(USERS_DIR, f"{username}.npy")
+    np.save(ruta, vector_rostro)
+    return True
+
+
+def registrar_rostro(username):
+    """Compatibilidad: captura y guarda en un solo paso, pidiendo el
+    username de inmediato (se mantiene por si se usa en otro flujo)."""
+    if not username.strip():
+        messagebox.showwarning("Falta información", "Escribe un nombre de usuario primero para asociar tu rostro.")
+        return False
+
+    if not hay_camara_disponible():
+        messagebox.showerror("Error", "Cámara no disponible.")
+        return False
+
+    vector = capturar_muestras_rostro()
+    if vector is None:
         messagebox.showwarning("Escaneo Fallido", "No se detectó el rostro de batalla. Intenta de nuevo.")
         return False
+
+    guardar_vector_rostro(username, vector)
+    messagebox.showinfo("Éxito", f"¡Rostro de '{username}' vinculado perfectamente!")
+    return True
 
 
 def login_con_rostro(callback_exito):
@@ -1274,7 +1399,7 @@ def mostrar_registro():
             "2. Contraseña: Debe poseer entre 8 y 16 caracteres, incluir obligatoriamente al menos una letra MAYÚSCULA y al menos un NÚMERO.\n"
             "3. Hobbies: Puede marcar una combinación personalizada de hasta un máximo de 3 opciones.\n"
             "4. Pregunta de Seguridad: Elija una y provea una respuesta para la futura validación o recuperación de contraseña.\n"
-            "5. Registro Facial: Escriba primero su Username, haga clic en 'Usar Foto 📷' y mire fijo al lente para capturar las 10 muestras.\n"
+            "5. Foto de Perfil: Haga clic en 'Subir Foto 📁' y seleccione una imagen PNG, JPG o JPEG de menos de 1 MB. Si su equipo tiene cámara, se abrirá automáticamente justo después para capturar su rostro y habilitar el inicio de sesión facial (el Username se vincula al finalizar el registro).\n"
             "6. Tarjeta: Ingrese los 16 dígitos requeridos para su membresía.\n"
             "7. Vencimiento de Tarjeta: Indique la fecha de expiración mediante el selector.\n"
             "8. Términos: Haga clic obligatoriamente en 'Leer términos y condiciones' para habilitar la casilla 'Acepto'."
@@ -1292,25 +1417,89 @@ def mostrar_registro():
 
     tk.Label(frame_contenido, text="CREAR CUENTA", font=("Segoe UI", 14, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=(8, 2))
 
+    DIAM_AVATAR = 76
+
     frame_photo = tk.Frame(frame_contenido, bg=COLOR_SURFACE_CARD)
     frame_photo.pack(fill="x", padx=25, pady=2)
-    tk.Label(frame_photo, text="Foto de Perfil / Registro Facial", font=("Segoe UI", 8), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD).pack(anchor="w", padx=2)
-    
-    frame_inner_photo = tk.Frame(frame_photo, bg=COLOR_SURFACE_CARD)
-    frame_inner_photo.pack(fill="x")
-    
-    lbl_photo_status = tk.Label(frame_inner_photo, text="Ningún rostro guardado", font=("Segoe UI", 8, "italic"), fg=COLOR_TEXT_SEC, bg=COLOR_INPUT_BG, anchor="w")
-    lbl_photo_status.pack(side="left", fill="x", expand=True, ipady=4, padx=(0, 5))
-    
-    def ejecutar_captura():
-        user = ent_user.get().strip()
-        if registrar_rostro(user):
-            lbl_photo_status.config(text="📷 ¡Rostro Vinculado!", fg="#00ff00")
+    tk.Label(frame_photo, text="Foto de Perfil", font=("Segoe UI", 8), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD).pack(anchor="w", padx=2)
 
-    btn_photo = RoundedButton(frame_inner_photo, text="Usar Foto 📷", radius=12, width=130, height=30,
+    frame_inner_photo = tk.Frame(frame_photo, bg=COLOR_SURFACE_CARD)
+    frame_inner_photo.pack(fill="x", pady=(4, 0))
+
+    # --- Avatar circular (estilo WhatsApp) al lado izquierdo ---
+    canvas_avatar = tk.Canvas(frame_inner_photo, width=DIAM_AVATAR, height=DIAM_AVATAR,
+                               bg=COLOR_SURFACE_CARD, highlightthickness=0)
+    canvas_avatar.pack(side="left", padx=(0, 12))
+
+    def _dibujar_avatar_placeholder():
+        canvas_avatar.delete("all")
+        canvas_avatar.create_oval(2, 2, DIAM_AVATAR - 2, DIAM_AVATAR - 2,
+                                   fill=COLOR_INPUT_BG, outline=COLOR_TEXT_SEC, width=2)
+        canvas_avatar.create_text(DIAM_AVATAR / 2, DIAM_AVATAR / 2, text="👤", font=("Segoe UI", 26))
+
+    _dibujar_avatar_placeholder()
+
+    frame_photo_info = tk.Frame(frame_inner_photo, bg=COLOR_SURFACE_CARD)
+    frame_photo_info.pack(side="left", fill="x", expand=True)
+
+    lbl_photo_status = tk.Label(frame_photo_info, text="Ningún archivo seleccionado\n(PNG, JPG o JPEG, máx. 1 MB)",
+                                 font=("Segoe UI", 8, "italic"), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD,
+                                 anchor="w", justify="left")
+    lbl_photo_status.pack(anchor="w", pady=(0, 6))
+
+    estado_foto = {"ruta": None, "vector_rostro": None}
+
+    def capturar_rostro_tras_subida():
+        """Justo después de subir la foto: si hay cámara, la abre de inmediato
+        y captura el rostro (sin pedir aún el username, se vincula al final)."""
+        if not hay_camara_disponible():
+            return
+        vector = capturar_muestras_rostro(titulo_ventana="Registro Facial Automático")
+        if vector is not None:
+            estado_foto["vector_rostro"] = vector
+            lbl_photo_status.config(
+                text=lbl_photo_status.cget("text") + "\n📷 Rostro capturado para inicio de sesión facial",
+                fg="#33cc66"
+            )
+        else:
+            messagebox.showwarning("Rostro no detectado",
+                                    "Se subió la foto, pero no se detectó tu rostro en la cámara.\n"
+                                    "Puedes intentarlo de nuevo subiendo otra vez la foto.")
+
+    def subir_foto():
+        ruta = filedialog.askopenfilename(
+            title="Selecciona tu foto de perfil",
+            filetypes=[("Imágenes", "*.png *.jpg *.jpeg"), ("Todos los archivos", "*.*")]
+        )
+        if not ruta:
+            return
+
+        ok, error = validar_archivo_foto(ruta)
+        if not ok:
+            messagebox.showerror("Archivo inválido", error)
+            return
+
+        avatar_img = crear_avatar_circular_png(ruta, DIAM_AVATAR)
+        if avatar_img is None:
+            messagebox.showerror("Error", "No se pudo procesar la imagen seleccionada.")
+            return
+
+        canvas_avatar.delete("all")
+        canvas_avatar._imagen_actual = avatar_img  # evita que el garbage collector la borre
+        canvas_avatar.create_image(DIAM_AVATAR / 2, DIAM_AVATAR / 2, image=avatar_img)
+
+        estado_foto["ruta"] = ruta
+        estado_foto["vector_rostro"] = None
+        peso_kb = os.path.getsize(ruta) / 1024
+        lbl_photo_status.config(text=f"✅ {os.path.basename(ruta)} ({peso_kb:.0f} KB)", fg="#33cc66")
+
+        # Justo después de subir el archivo: si hay cámara, se abre y captura el rostro.
+        capturar_rostro_tras_subida()
+
+    btn_photo = RoundedButton(frame_photo_info, text="Subir Foto 📁", radius=12, width=140, height=30,
                                font=("Segoe UI", 8, "bold"), bg_color=COLOR_INPUT_BG, fg_color=COLOR_TEXT_MAIN,
-                               hover_color=COLOR_PRIMARY_RED, canvas_bg=COLOR_SURFACE_CARD, command=ejecutar_captura)
-    btn_photo.pack(side="right", padx=2)
+                               hover_color=COLOR_PRIMARY_RED, canvas_bg=COLOR_SURFACE_CARD, command=subir_foto)
+    btn_photo.pack(anchor="w")
 
     def crear_fila_input(label_text, is_password=False, placeholder=""):
         frame = tk.Frame(frame_contenido, bg=COLOR_SURFACE_CARD)
@@ -1558,7 +1747,10 @@ def mostrar_registro():
             messagebox.showwarning("Términos", "Debes leer y aceptar los términos para entrar.")
             return
 
-        exito = guardar_nuevo_usuario(user, p1, nombre, fecha, genero, hobbies_seleccionados, pregunta, respuesta, tarjeta, vencimiento_tarjeta)
+        exito = guardar_nuevo_usuario(user, p1, nombre, fecha, genero, hobbies_seleccionados, pregunta, respuesta, tarjeta, vencimiento_tarjeta,
+                                       foto_perfil=guardar_foto_perfil_usuario(user, estado_foto["ruta"]) if estado_foto["ruta"] else None)
+        if exito and estado_foto["vector_rostro"] is not None:
+            guardar_vector_rostro(user, estado_foto["vector_rostro"])
         if not exito:
             messagebox.showerror("Error", "Ese Nombre de Usuario ya está en uso.")
             return
