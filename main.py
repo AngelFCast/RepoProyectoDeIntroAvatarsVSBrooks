@@ -515,13 +515,13 @@ def mostrar_personalizacion():
     for widget in contenedor_principal.winfo_children():
         widget.destroy()
     
+    btn_settings.place_forget()
+    canvas_tarjeta_principal.place(relx=0.5, rely=0.5, anchor="center", width=506, height=506)
+
     # Botón X
     btn_x = RoundedButton(contenedor_principal, text="X", radius=14, width=30, height=30, font=("Arial", 10),
                            command=mostrar_lobby)
     btn_x.place(relx=1.0, rely=0.0, x=-10, y=10, anchor="ne")
-    
-    btn_settings.config(command=mostrar_lobby)
-    canvas_tarjeta_principal.place(relx=0.5, rely=0.5, anchor="center", width=506, height=506)
 
     tk.Label(contenedor_principal, text="PERSONALIZACIÓN", font=("Segoe UI", 16, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=(30, 20))
     tk.Label(contenedor_principal, text="1. Elige tu Color Base", font=("Segoe UI", 9), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD).pack(anchor="w", padx=40)
@@ -542,7 +542,11 @@ def mostrar_personalizacion():
     btn_apply = RoundedButton(contenedor_principal, text="APLICAR CAMBIOS", radius=RADIO_BOTON, height=46,
                                font=("Segoe UI", 10, "bold"),
                                command=lambda: messagebox.showinfo("Éxito", f"Paleta actualizada a {color_actual.get()}"))
-    btn_apply.pack(fill="x", padx=40, pady=20)
+    btn_apply.pack(fill="x", padx=40, pady=(20, 5))
+
+    lbl_back_lobby = tk.Label(contenedor_principal, text="← Volver al Menú Principal", font=("Segoe UI", 8, "underline"), fg=COLOR_TEXT_SEC, bg=COLOR_SURFACE_CARD, cursor="hand2")
+    lbl_back_lobby.pack(pady=2)
+    lbl_back_lobby.bind("<Button-1>", lambda e: mostrar_lobby())
 
 
 # --- VISTA: LOBBY PRINCIPAL ---
@@ -556,6 +560,7 @@ def mostrar_lobby():
         
     canvas_tarjeta_principal.place(relx=0.5, rely=0.5, anchor="center", width=556, height=486)
     btn_settings.config(command=abrir_modal_configuracion)
+    btn_settings.place(x=25, y=25)
 
     tk.Label(contenedor_principal, text="AVATARS VS ROOKS", font=("Segoe UI", 20, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=(40, 2))
     tk.Label(contenedor_principal, text="BIENVENIDO, USUARIO", font=("Segoe UI", 11, "bold"), fg=COLOR_TEXT_MAIN, bg=COLOR_SURFACE_CARD).pack(pady=(0, 40))
@@ -654,7 +659,7 @@ def mostrar_login():
                            command=mostrar_lobby)
     btn_x.pack(side="left", padx=1)
 
-    btn_settings.config(command=mostrar_lobby)
+    btn_settings.place_forget()
 
     canvas_tarjeta_principal.place(relx=0.5, rely=0.5, anchor="center", width=556, height=586)
 
@@ -801,6 +806,8 @@ def mostrar_registro():
     btn_x = RoundedButton(frame_top_buttons, text="X", radius=10, width=28, height=28, font=("Arial", 10, "bold"),
                            command=lambda: [_unbind_mousewheel(), mostrar_login()])
     btn_x.pack(side="left", padx=1)
+
+    btn_settings.place_forget()
 
     tk.Label(frame_contenido, text="CREAR CUENTA", font=("Segoe UI", 14, "bold"), fg=COLOR_PRIMARY_RED, bg=COLOR_SURFACE_CARD).pack(pady=(8, 2))
 
