@@ -1133,6 +1133,87 @@ def maximizar_ventana(win):
             pass
 
 
+# --- VENTANA DE AYUDA (ANCHA Y CON SCROLL) ---
+# Sustituye a messagebox.showinfo para los textos de ayuda, ya que ese
+# messagebox por defecto es demasiado angosto y corta/ajusta muy mal
+# textos largos con varios puntos numerados.
+
+def mostrar_ventana_ayuda(titulo, cuerpo, icono="💡", al_abrir=None, al_cerrar=None):
+    if al_abrir:
+        al_abrir()
+
+    modal = tk.Toplevel(ventana)
+    modal.title(titulo)
+    modal.configure(bg=COLOR_DEEP_BG)
+    modal.transient(ventana)
+    modal.withdraw()
+
+    def _cerrar_modal():
+        if al_cerrar:
+            al_cerrar()
+        modal.destroy()
+
+    modal.protocol("WM_DELETE_WINDOW", _cerrar_modal)
+
+    ANCHO_MODAL, ALTO_MODAL = 620, 640
+    modal.minsize(420, 350)
+    modal.geometry(f"{ANCHO_MODAL}x{ALTO_MODAL}")
+
+    canvas_card, card = crear_tarjeta_redondeada(modal, radio=RADIO_TARJETA)
+    canvas_card.pack(fill="both", expand=True, padx=14, pady=14)
+
+    # --- Encabezado (icono + título) ---
+    frame_header = tk.Frame(card, bg=COLOR_SURFACE_CARD)
+    frame_header.pack(fill="x", padx=20, pady=(18, 6))
+    tk.Label(frame_header, text=icono, font=("Segoe UI", 18), bg=COLOR_SURFACE_CARD).pack(side="left", padx=(0, 10))
+    tk.Label(frame_header, text=titulo, font=("Segoe UI", 13, "bold"), fg=COLOR_PRIMARY_RED,
+             bg=COLOR_SURFACE_CARD, anchor="w", justify="left", wraplength=ANCHO_MODAL - 100).pack(side="left", fill="x", expand=True)
+
+    # --- Cuerpo del texto, con scroll y ajuste de línea amplio ---
+    frame_texto = tk.Frame(card, bg=COLOR_SURFACE_CARD)
+    frame_texto.pack(fill="both", expand=True, padx=20, pady=(4, 10))
+
+    scrollbar_ayuda = tk.Scrollbar(frame_texto, orient="vertical")
+    scrollbar_ayuda.pack(side="right", fill="y")
+
+    txt = tk.Text(frame_texto, wrap="word", font=("Segoe UI", 11, "bold"),
+                   bg=COLOR_SURFACE_CARD, fg=COLOR_TEXT_MAIN, bd=0, highlightthickness=0,
+                   padx=4, pady=4, yscrollcommand=scrollbar_ayuda.set, cursor="arrow")
+    txt.insert("1.0", cuerpo)
+    txt.config(state="disabled")
+    txt.pack(side="left", fill="both", expand=True)
+    scrollbar_ayuda.config(command=txt.yview)
+
+    def _on_mousewheel_ayuda(event):
+        if event.num == 4:
+            txt.yview_scroll(-1, "units")
+        elif event.num == 5:
+            txt.yview_scroll(1, "units")
+        else:
+            txt.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    txt.bind("<MouseWheel>", _on_mousewheel_ayuda)
+    txt.bind("<Button-4>", _on_mousewheel_ayuda)
+    txt.bind("<Button-5>", _on_mousewheel_ayuda)
+
+    btn_cerrar = RoundedButton(card, text="CERRAR", radius=RADIO_BOTON, height=42,
+                                font=("Segoe UI", 10, "bold"), command=_cerrar_modal)
+    btn_cerrar.pack(fill="x", padx=20, pady=(0, 18))
+
+    modal.update_idletasks()
+    x = ventana.winfo_x() + (ventana.winfo_width() // 2) - (ANCHO_MODAL // 2)
+    y = ventana.winfo_y() + (ventana.winfo_height() // 2) - (ALTO_MODAL // 2)
+    modal.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+
+    modal.deiconify()
+    modal.lift()
+    modal.focus_force()
+    try:
+        modal.grab_set()
+    except tk.TclError:
+        modal.after(100, lambda: modal.grab_set())
+
+
 # --- VISTA: PERSONALIZACIÓN ---
 
 def mostrar_personalizacion():
@@ -1308,13 +1389,12 @@ def mostrar_login():
 
     # Botón de Ayuda (?) - Login
     def mostrar_ayuda_login():
-        messagebox.showinfo(
+        mostrar_ventana_ayuda(
             "Ayuda - Inicio de Sesión",
             "Instrucciones de Login:\n\n"
-            "1. Ingrese su Nombre de Usuario y Contraseña en los campos correspondientes.\n"
-            "2. Presione 'INICIAR SESIÓN' para validar sus credenciales tradicionales.\n"
-            "3. Alternativamente, si vinculó su rostro, presione 'Ingresar con Rostro 📷' para usar el escaneo facial.\n"
-            "4. Si ha olvidado sus credenciales, haga clic en '¿Olvidaste tu contraseña?' para recuperarla mediante su pregunta de seguridad.\n"
+            "1. Ingrese su Nombre de Usuario y Contraseña en los campos correspondientes.\n\n"
+            "2. Presione 'INICIAR SESIÓN' para validar sus credenciales tradicionales.\n\n"
+            "3. Alternativamente, si vinculó su rostro, presione 'Ingresar con Rostro 📷' para usar el escaneo facial.\n\n"
             "Nota: El sistema se bloqueará por 3 minutos tras 3 intentos fallidos."
         )
 
@@ -1452,17 +1532,19 @@ def mostrar_registro():
 
     # Botón de Ayuda (?) - Registro
     def mostrar_ayuda_registro():
-        messagebox.showinfo(
+        mostrar_ventana_ayuda(
             "Ayuda - Creación de Cuenta",
             "Instrucciones de Registro:\n\n"
-            "1. Complete todos sus datos básicos (Nombre, Fecha, Género, Username y Hobbies).\n"
-            "2. Contraseña: Debe poseer entre 8 y 16 caracteres, incluir obligatoriamente al menos una letra MAYÚSCULA y al menos un NÚMERO.\n"
-            "3. Hobbies: Puede marcar una combinación personalizada de hasta un máximo de 3 opciones.\n"
-            "4. Pregunta de Seguridad: Elija una y provea una respuesta para la futura validación o recuperación de contraseña.\n"
-            "5. Foto de Perfil: Haga clic en 'Subir Foto 📁' y seleccione una imagen PNG, JPG o JPEG de menos de 1 MB. Si su equipo tiene cámara, se abrirá automáticamente justo después para capturar su rostro y habilitar el inicio de sesión facial (el Username se vincula al finalizar el registro).\n"
-            "6. Tarjeta: Ingrese los 16 dígitos requeridos para su membresía.\n"
-            "7. Vencimiento de Tarjeta: Indique la fecha de expiración mediante el selector.\n"
-            "8. Términos: Haga clic obligatoriamente en 'Leer términos y condiciones' para habilitar la casilla 'Acepto'."
+            "1. Complete todos sus datos básicos (Nombre, Fecha, Género, Username y Hobbies).\n\n"
+            "2. Contraseña: Debe poseer entre 8 y 16 caracteres, incluir obligatoriamente al menos una letra MAYÚSCULA y al menos un NÚMERO.\n\n"
+            "3. Hobbies: Puede marcar una combinación personalizada de hasta un máximo de 3 opciones.\n\n"
+            "4. Pregunta de Seguridad: Elija una y provea una respuesta para la futura validación o recuperación de contraseña.\n\n"
+            "5. Foto de Perfil: Haga clic en 'Subir Foto 📁' y seleccione una imagen PNG, JPG o JPEG de menos de 1 MB. Si su equipo tiene cámara, se abrirá automáticamente justo después para capturar su rostro y habilitar el inicio de sesión facial (el Username se vincula al finalizar el registro).\n\n"
+            "6. Tarjeta: Ingrese los 16 dígitos requeridos para su membresía.\n\n"
+            "7. Vencimiento de Tarjeta: Indique la fecha de expiración mediante el selector.\n\n"
+            "8. Términos: Haga clic obligatoriamente en 'Leer términos y condiciones' para habilitar la casilla 'Acepto'.",
+            al_abrir=desactivar_scroll_global,
+            al_cerrar=reactivar_scroll_global
         )
 
     btn_help = RoundedButton(frame_top_buttons, text="?", radius=10, width=28, height=28, font=("Arial", 10, "bold"),
@@ -1764,7 +1846,7 @@ def mostrar_registro():
     var_terminos = tk.BooleanVar(value=False)
 
     def abrir_terminos():
-        webbrowser.open("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        webbrowser.open("https://www.lipsum.com/")
         var_leido.set(True)
         chk_terms.config(state="normal")
 

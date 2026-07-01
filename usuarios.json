@@ -28,5 +28,21 @@
         "respuesta_seguridad": "Dios",
         "tarjeta_membresia": "**** **** **** 1111",
         "vencimiento_tarjeta": "06/06/2029"
+    },
+    "UsuarioUno": {
+        "password": "Password1",
+        "nombre": "Usuario1",
+        "fecha_nacimiento": "30/06/2026",
+        "genero": "Masculino",
+        "hobbies": [
+            "M\u00fasica",
+            "Ajedrez",
+            "C\u00f3digo"
+        ],
+        "pregunta_seguridad": "\u00bfCu\u00e1l es el mejor equipo de f\u00fatbol de CR?",
+        "respuesta_seguridad": "La liga",
+        "tarjeta_membresia": "**** **** **** 1111",
+        "vencimiento_tarjeta": "15/06/2028",
+        "foto_perfil": "UsuarioUno.png"
     }
 }
